@@ -13,8 +13,7 @@ primary_region = 'lax'
   # Backend API (Fly) that holds Dad's watchlists — drives the Markets tab.
   STOCK_API_BASE = 'https://stockdashboard.fly.dev'
   # The full dashboard UI (Vercel frontend) the Markets button opens.
-  # Set this to your Vercel URL, e.g. https://your-dashboard.vercel.app
-  STOCK_DASHBOARD_URL = 'https://CHANGE-ME-dashboard.vercel.app'
+  STOCK_DASHBOARD_URL = 'https://stockdashboard-ochre.vercel.app'
 
 [http_service]
   internal_port = 8000
