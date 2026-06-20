@@ -5,7 +5,7 @@
 # IMPORTANT: pick a globally-unique app name before first launch
 # (or let `fly launch` set it for you).
 
-app = "CHANGE-ME-morning-desk"
+app = "dad-dashboard" # must be globally unique across all of Fly -> becomes dad-dashboard.fly.dev
 primary_region = "lax" # close to Los Angeles; see https://fly.io/docs/reference/regions/
 
 [build]
