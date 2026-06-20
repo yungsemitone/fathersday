@@ -18,10 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from config import CORS_ORIGINS
+from config import CORS_ORIGINS, STOCK_DASHBOARD_URL
 from sources.markets import fetch_markets
 from sources.news import fetch_news
-from sources.sports import TEAMS, fetch_sports, fetch_team_detail
+from sources.sports import TEAMS, fetch_player_detail, fetch_sports, fetch_team_detail
 from sources.wine import fetch_wine
 from sources.wsl import fetch_wsl
 
@@ -55,6 +55,7 @@ def dashboard():
         "sports": _safe(fetch_sports),
         "wine": _safe(fetch_wine),
         "news": _safe(fetch_news),
+        "dashboardUrl": STOCK_DASHBOARD_URL,
     })
 
 
@@ -80,6 +81,16 @@ def sports_detail(team: str):
     data = _safe(fetch_team_detail, team)
     if data is None:
         raise HTTPException(502, "Upstream sports data unavailable")
+    return JSONResponse(data)
+
+
+@app.get("/api/sports/{team}/player/{player_id}")
+def player_detail(team: str, player_id: str):
+    if team not in TEAMS:
+        raise HTTPException(404, f"Unknown team '{team}'")
+    data = _safe(fetch_player_detail, team, player_id)
+    if data is None:
+        raise HTTPException(502, "Player data unavailable")
     return JSONResponse(data)
 
 

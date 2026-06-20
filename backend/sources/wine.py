@@ -22,12 +22,18 @@ from __future__ import annotations
 
 import csv
 import os
+from urllib.parse import quote_plus
 
 from bs4 import BeautifulSoup
 
 from cache import cached
 from config import TTL_WINE
 from httpc import get_text
+
+
+def _kl_search_url(name: str) -> str:
+    """A K&L marketplace search for the bottle (used when we lack a live lot URL)."""
+    return f"https://www.klwines.com/Products?searchText={quote_plus(name)}"
 
 CELLAR_CSV = os.path.join(os.path.dirname(__file__), "..", "data", "wine_cellar.csv")
 KL_AUCTION_URL = "https://www.klwines.com/auctions"
@@ -102,6 +108,8 @@ def _qualify(rows: list[dict]) -> list[dict]:
             "left": r.get("left", "—"),
             "score": score,
             "critic": r.get("critic", ""),
+            # Real lot URL when scraped live; otherwise a K&L search for the bottle.
+            "url": r.get("url") or _kl_search_url(r["name"]),
         })
     out.sort(key=lambda w: (w["mkt"] - w["bid"]) / w["mkt"], reverse=True)
     return out

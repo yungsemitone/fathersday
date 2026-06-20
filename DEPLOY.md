@@ -35,6 +35,15 @@ fly secrets set STOCK_API_BASE=https://<your-stock-backend>.fly.dev
 If you skip this, the app still deploys — Markets just shows sample data until
 the URL is set. (Sports, Wine, News are live regardless.)
 
+`fly.toml` already sets `STOCK_API_BASE = https://stockdashboard.fly.dev` (your
+live backend), so you usually don't need the command above. It also has a
+`STOCK_DASHBOARD_URL` placeholder — set that to your **Vercel dashboard URL** so
+the Markets tab's "Open the full Stock Dashboard" button works:
+
+```bash
+fly secrets set STOCK_DASHBOARD_URL=https://<your-dashboard>.vercel.app
+```
+
 ## Deploy
 
 ```bash

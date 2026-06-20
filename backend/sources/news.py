@@ -19,12 +19,13 @@ from config import TTL_NEWS
 from httpc import HEADERS
 
 # (source label, feed url). All verified to return clean XML with a browser UA.
-# Markets-focused first; these drive what's "moving things" for Dad.
+# Markets-focused only — MarketWatch's "topstories" was dropped because it mixes
+# in personal-finance advice columns, which aren't market movers.
 FEEDS = [
     ("WSJ Markets", "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"),
     ("Yahoo Finance", "https://finance.yahoo.com/news/rssindex"),
     ("CNBC", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
-    ("MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_topstories"),
+    ("CNBC Markets", "https://www.cnbc.com/id/20910258/device/rss/rss.html"),
 ]
 
 # Drop personal-finance / advice-column fluff — Dad wants market movers, not
@@ -33,7 +34,8 @@ EXCLUDE = re.compile(
     r"\bretire(?:ment|d|s)?\b|social security|\b401\(?k\)?\b|\bira\b|moneyist|"
     r"\bmy (?:\w+ ){0,2}(?:husband|wife|son|daughter|mother|father|mom|dad|sister|brother|partner|parents?|kids?|in-laws?)\b|"
     r"\bi (?:spent|inherited|paid|owe)\b|\bshould i\b|\bi'?m \d{2}\b|\bdear \b|"
-    r"inherit|personal finance|how to (?:save|retire|budget|pay off)",
+    r"inherit|personal finance|financial advis|estate plan|family wealth|"
+    r"how to (?:save|retire|budget|pay off)",
     re.I,
 )
 
@@ -61,7 +63,10 @@ def fetch_news():
         for entry in feed.entries[:PER_FEED]:
             title = _clean(entry.get("title", ""), 160)
             key = title.lower()
-            if not title or key in seen or EXCLUDE.search(title):
+            # Normalize curly quotes so the advice-column filter still matches
+            # (feeds love "I’m 73…" with a curly apostrophe).
+            norm = title.replace("’", "'").replace("‘", "'")
+            if not title or key in seen or EXCLUDE.search(norm):
                 continue
             seen.add(key)
             stories.append({

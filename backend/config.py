@@ -21,6 +21,11 @@ STOCK_API_BASE = os.getenv("STOCK_API_BASE", "http://localhost:8000").rstrip("/"
 # Which of Dad's watchlists to feature on the Markets tab. Empty = first list.
 FEATURED_WATCHLIST = os.getenv("FEATURED_WATCHLIST", "")
 
+# The full Stock Dashboard UI (the Vercel frontend Dad uses). When set, the
+# Markets tab shows an "Open the full dashboard" button linking here. This is
+# the *frontend* URL, not STOCK_API_BASE (which is the backend API).
+STOCK_DASHBOARD_URL = os.getenv("STOCK_DASHBOARD_URL", "")
+
 # --- CORS (only needed if the frontend is hosted on another origin) ---------
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
 

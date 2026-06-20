@@ -87,6 +87,17 @@ function quoteRow(o) {
 }
 
 let CARDS = SAMPLE.sports;   // current sports cards (for re-render)
+let DASH_URL = "";           // the full Stock Dashboard URL (from backend config)
+
+function renderDashboardButton() {
+  const btn = document.getElementById("dashboard-link");
+  if (DASH_URL) {
+    btn.href = DASH_URL;
+    btn.style.display = "inline-flex";
+  } else {
+    btn.style.display = "none";
+  }
+}
 
 /* ---------------------------------------------------------------------
    Render the dashboard (home + markets + wine + news + sports grid)
@@ -110,14 +121,18 @@ function render(data) {
   document.getElementById("wine-body").innerHTML = data.wine
     .map(w => ({ ...w, disc: discPct(w) }))
     .sort((a, b) => b.disc - a.disc)
-    .map(w => `
+    .map(w => {
+      const href = w.url || ("https://www.klwines.com/Products?searchText=" + encodeURIComponent(w.name));
+      const chip = w.score ? `<span class="score-chip">${esc(w.score)}${w.critic ? " " + esc(w.critic) : ""}</span>` : "";
+      return `
       <tr>
-        <td><div class="wine-name">${esc(w.name)}${w.score ? `<span class="score-chip">${esc(w.score)}${w.critic ? " " + esc(w.critic) : ""}</span>` : ""}</div><div class="wine-sub">${esc(w.region)}</div></td>
+        <td><a class="wine-name" href="${esc(href)}" target="_blank" rel="noopener">${esc(w.name)}</a>${chip}<div class="wine-sub">${esc(w.region)}</div></td>
         <td class="mono">$${w.bid}</td>
         <td class="mono" style="color:var(--ink-3)">$${w.mkt}</td>
         <td class="mono" style="color:var(--ink-3)">${esc(w.left)}</td>
         <td><span class="disc">−${w.disc}%</span></td>
-      </tr>`).join("");
+      </tr>`;
+    }).join("");
 
   document.getElementById("news-body").innerHTML = data.news.map(n => {
     const href = n.url && n.url !== "#" ? esc(n.url) : null;
@@ -174,7 +189,7 @@ function renderSportsGrid(cards) {
 /* ---------------------------------------------------------------------
    Sports — detail view
    --------------------------------------------------------------------- */
-async function openTeam(key) {
+async function openTeam(key, subIndex = 0) {
   const home = document.getElementById("sports-home");
   const detail = document.getElementById("sports-detail");
   home.style.display = "none";
@@ -189,6 +204,11 @@ async function openTeam(key) {
     const d = await res.json();
     detail.innerHTML = (d.kind === "wsl" || key === "wsl") ? renderWsl(d) : renderTeam(d);
     wireSubtabs(detail);
+    wireRoster(detail);
+    if (subIndex > 0) {
+      const st = detail.querySelector(`.subtab[data-sub="${subIndex}"]`);
+      if (st) st.click();
+    }
   } catch (e) {
     const card = CARDS.find(c => c.key === key) || {};
     detail.innerHTML = `<button class="backlink" onclick="closeTeam()">← All teams</button>
@@ -204,6 +224,7 @@ function closeTeam() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 window.closeTeam = closeTeam;
+window.openTeam = openTeam;
 
 function detailHead(d) {
   const rec = [d.record, d.standing].filter(Boolean).join(" · ");
@@ -234,7 +255,11 @@ function renderTeam(d) {
     const pic = p.headshot
       ? `<img src="${esc(p.headshot)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`
       : `<div class="badge" style="width:42px;height:42px;border-radius:50%;background:${esc(d.color)}">${esc(p.pos || "")}</div>`;
-    return `<div class="player">${pic}<div><div class="pname">${esc(p.name)}</div><div class="pmeta">${esc(meta)}</div></div></div>`;
+    const tappable = p.id != null;
+    const nameCls = tappable ? "pname tap" : "pname";
+    const attrs = tappable ? ` data-player="${esc(p.id)}" data-team="${esc(d.key)}"` : "";
+    const arrow = tappable ? `<span class="go">→</span>` : "";
+    return `<div class="player">${pic}<div><div class="${nameCls}"${attrs}>${esc(p.name)}</div><div class="pmeta">${esc(meta)}</div></div>${arrow}</div>`;
   }).join("") + `</div>` : `<p class="empty">Roster not posted yet.</p>`;
 
   // Stats
@@ -246,16 +271,25 @@ function renderTeam(d) {
     ? `<div class="statgrid">${splitCards}${statCards}</div>`
     : `<p class="empty">Season stats appear once games are played.</p>`;
 
-  // Schedule
-  const sched = (d.schedule || []).length ? d.schedule.map(g => {
-    const res = g.completed
-      ? `<span class="sched-res ${g.res}">${esc(g.result || "")}</span>`
-      : `<span class="sched-res"><span class="upcoming-tag">Upcoming</span></span>`;
-    return `<div class="sched-row">
-      <span class="sched-when">${weekday(g.date)} ${mdy(g.date)}</span>
-      <span class="sched-match"><span class="opp">${esc(g.where)} ${esc(g.opp_name || g.opp)}</span></span>
-      ${res}</div>`;
-  }).join("") : `<p class="empty">No games on the schedule yet — offseason.</p>`;
+  // Schedule — full window, scrollable, with a divider + highlight at "next"
+  let sched;
+  if ((d.schedule || []).length) {
+    let markedNext = false;
+    const rows = d.schedule.map(g => {
+      let pre = "", cls = "sched-row";
+      if (!g.completed && !markedNext) { pre = `<div class="sched-divider">Upcoming</div>`; cls += " is-next"; markedNext = true; }
+      const res = g.completed
+        ? `<span class="sched-res ${g.res}">${esc(g.result || "")}</span>`
+        : `<span class="sched-res"><span class="upcoming-tag">Upcoming</span></span>`;
+      return pre + `<div class="${cls}">
+        <span class="sched-when">${weekday(g.date)} ${mdy(g.date)}</span>
+        <span class="sched-match"><span class="opp">${esc(g.where)} ${esc(g.opp_name || g.opp)}</span></span>
+        ${res}</div>`;
+    });
+    sched = `<div class="scrolllist">${rows.join("")}</div>`;
+  } else {
+    sched = `<p class="empty">No games on the schedule yet — offseason.</p>`;
+  }
 
   return detailHead(d) + subNav(["News", "Roster", "Stats", "Schedule"]) +
     `<div class="subpanel active">${news}</div>
@@ -286,17 +320,20 @@ function renderWsl(d) {
       <p class="footnote" style="margin-top:16px;">Live wave forecast (daily max) from Open-Meteo's Marine API for the event location.</p>
     </div>`;
 
-  // Schedule + winners
+  // Schedule + winners — scrollable, divider + highlight at the next event
+  let markedNext = false;
   const events = (d.events || []).map(ev => {
+    let pre = "", cls = "sched-row";
+    if (!ev.completed && !markedNext) { pre = `<div class="sched-divider">Upcoming</div>`; cls += " is-next"; markedNext = true; }
     const win = ev.completed
       ? `<span class="sched-res" style="text-align:right;min-width:auto"><span style="color:var(--gold)">🏆 ${esc(ev.men || "")}${ev.women ? " · " + esc(ev.women) : ""}</span></span>`
       : `<span class="sched-res"><span class="upcoming-tag">Upcoming</span></span>`;
-    return `<div class="sched-row">
+    return pre + `<div class="${cls}">
       <span class="sched-when">${esc(mdy(ev.start))}</span>
       <span class="sched-match"><span class="opp">${esc(ev.name)}</span><div class="meta" style="margin-top:2px">${esc(ev.spot)} · ${esc(ev.country)}</div></span>
       ${win}</div>`;
   }).join("");
-  const schedule = `<div class="card">${events}</div>`;
+  const schedule = `<div class="card"><div class="scrolllist">${events}</div></div>`;
 
   // Rankings
   const rk = d.rankings || { men: [], women: [] };
@@ -323,7 +360,54 @@ function wireSubtabs(root) {
   tabs.forEach(t => t.addEventListener("click", () => {
     tabs.forEach(x => x.setAttribute("aria-selected", String(x === t)));
     panels.forEach((p, i) => p.classList.toggle("active", i === Number(t.dataset.sub)));
+    // When a scrollable schedule opens, jump it to the next game/event.
+    const active = panels[Number(t.dataset.sub)];
+    const list = active && active.querySelector(".scrolllist");
+    const marker = list && (list.querySelector(".is-next") || list.querySelector(".sched-divider"));
+    if (list && marker) list.scrollTop = Math.max(0, marker.offsetTop - 54);
   }));
+}
+
+/* Roster names -> player page */
+function wireRoster(root) {
+  root.querySelectorAll("[data-player]").forEach(el =>
+    el.addEventListener("click", () => openPlayer(el.dataset.team, el.dataset.player)));
+}
+
+async function openPlayer(teamKey, playerId) {
+  const detail = document.getElementById("sports-detail");
+  const back = `<button class="backlink" onclick="openTeam('${teamKey}', 1)">← Back to roster</button>`;
+  detail.innerHTML = back + `<p class="empty">Loading…</p>`;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  try {
+    const res = await fetch(API_BASE + `/api/sports/${teamKey}/player/${playerId}`, { cache: "no-store" });
+    if (!res.ok) throw new Error("bad status " + res.status);
+    detail.innerHTML = renderPlayer(await res.json());
+  } catch (e) {
+    detail.innerHTML = back + `<p class="empty">Couldn't load this player right now.</p>`;
+  }
+}
+window.openPlayer = openPlayer;
+
+function renderPlayer(d) {
+  const pic = d.headshot
+    ? `<img src="${esc(d.headshot)}" alt="" onerror="this.style.visibility='hidden'">`
+    : `<div class="badge" style="width:72px;height:72px;border-radius:50%;background:${esc(d.color)}">${esc(d.pos || "")}</div>`;
+  const num = d.num ? "#" + String(d.num).replace(/^#/, "") : "";
+  const sub = [num, d.pos, d.teamName].filter(Boolean).join(" · ");
+  const bio = (d.bio || []).map(b => `<div class="stat"><div class="k">${esc(b.k)}</div><div class="v">${esc(b.v)}</div></div>`).join("");
+  const season = (d.season && (d.season.stats || []).length)
+    ? `<p class="eyebrow" style="margin:22px 0 10px;">${esc(d.season.label)} · per game</p>
+       <div class="statgrid">` + d.season.stats.map(s => `<div class="stat"><div class="k">${esc(s.k)}</div><div class="v">${esc(s.v)}</div></div>`).join("") + `</div>`
+    : `<p class="empty">No season stats yet — offseason, or a role without box-score stats.</p>`;
+  const link = d.link ? `<a class="espn-link" href="${esc(d.link)}" target="_blank" rel="noopener">Full profile on ESPN →</a>` : "";
+  return `<button class="backlink" onclick="openTeam('${esc(d.teamKey)}', 1)">← Back to roster</button>
+    <div class="player-head">${pic}<div><h2>${esc(d.name)}</h2><div class="psub">${esc(sub)}</div></div></div>
+    <div class="card">
+      <p class="eyebrow" style="margin:0 0 12px;">Player info</p>
+      <div class="bio-grid">${bio}</div>
+      ${season}${link}
+    </div>`;
 }
 
 /* ---------------------------------------------------------------------
@@ -347,11 +431,13 @@ async function boot() {
         wine: j.wine || SAMPLE.wine,
         news: j.news || SAMPLE.news,
       };
+      DASH_URL = j.dashboardUrl || "";
       live = !!(j.markets || j.sports || j.wine || j.news);
     }
   } catch (e) { /* backend not up — keep sample */ }
 
   render(data);
+  renderDashboardButton();
   document.getElementById("data-status").textContent = live
     ? "Live data connected."
     : "Showing sample data — start the backend to go live. See README.";

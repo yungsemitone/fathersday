@@ -1,38 +1,37 @@
-# Fly.io config for The Morning Desk (FastAPI serving API + frontend).
-# Deploy from this directory:  fly deploy
-# Full first-time steps are in DEPLOY.md.
+# fly.toml app configuration file generated for dad-dashboard on 2026-06-20T13:46:36-04:00
 #
-# IMPORTANT: pick a globally-unique app name before first launch
-# (or let `fly launch` set it for you).
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "dad-dashboard" # must be globally unique across all of Fly -> becomes dad-dashboard.fly.dev
-primary_region = "lax" # close to Los Angeles; see https://fly.io/docs/reference/regions/
+app = 'dad-dashboard'
+primary_region = 'lax'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  # Where Dad's Stock Scraper API lives. Set this to the deployed backend URL
-  # (https://...). It's not a secret, so it can live here — or set it with
-  #   fly secrets set STOCK_API_BASE=https://your-stock-app.fly.dev
-  # If left unset/unreachable, the Markets tab shows sample data.
-  STOCK_API_BASE = "https://CHANGE-ME-stock-backend.fly.dev"
+  # Backend API (Fly) that holds Dad's watchlists — drives the Markets tab.
+  STOCK_API_BASE = 'https://stockdashboard.fly.dev'
+  # The full dashboard UI (Vercel frontend) the Markets button opens.
+  # Set this to your Vercel URL, e.g. https://your-dashboard.vercel.app
+  STOCK_DASHBOARD_URL = 'https://CHANGE-ME-dashboard.vercel.app'
 
 [http_service]
   internal_port = 8000
   force_https = true
-  # Always-on: keep one machine running 24/7 so it's instant every morning.
-  auto_stop_machines = false
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
 
   [[http_service.checks]]
-    interval = "30s"
-    timeout = "5s"
-    grace_period = "10s"
-    method = "GET"
-    path = "/api/health"
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/api/health'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb" # light: no pandas/numpy, just httpx + feedparser
+  size = 'shared-cpu-1x'
+  memory = '512mb'
+  cpus = 1
+  memory_mb = 512

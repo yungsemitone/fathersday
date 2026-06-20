@@ -17,6 +17,7 @@ from httpc import get_json
 from . import wsl
 
 ESPN = "https://site.api.espn.com/apis/site/v2/sports"
+ATHLETE = "https://site.web.api.espn.com/apis/common/v3/sports"
 
 # key -> everything we need to address ESPN + brand the card.
 TEAMS = {
@@ -207,6 +208,7 @@ def _detail_roster(team: dict) -> list[dict]:
     for a in athletes:
         pos = (a.get("position") or {}).get("abbreviation") or (a.get("position") or {}).get("name", "")
         out.append({
+            "id": a.get("id"),
             "name": a.get("displayName") or a.get("fullName", ""),
             "num": a.get("jersey", ""),
             "pos": pos,
@@ -246,10 +248,10 @@ def _detail_schedule(team: dict) -> list[dict]:
     data = get_json(f"{_base(team)}/teams/{team['path']}/schedule")
     events = (data or {}).get("events", []) if isinstance(data, dict) else []
     parsed = [e for e in (_parse_event(ev, team["id"], team["name"]) for ev in events) if e]
-    completed = [e for e in parsed if e["completed"]]
-    upcoming = [e for e in parsed if not e["completed"]]
-    # Last 6 results + next 6 games, in reading order.
-    return completed[-6:] + upcoming[:6]
+    # Return the whole window (past + upcoming), chronological — the frontend
+    # scrolls it and jumps to the next game.
+    parsed.sort(key=lambda e: e["date"])
+    return parsed
 
 
 @cached(ttl_seconds=TTL_SPORTS_DETAIL)
@@ -287,4 +289,72 @@ def fetch_team_detail(key: str):
         "roster": _detail_roster(team),
         "stats": _detail_stats(t.get("record") or {}),
         "schedule": _detail_schedule(team),
+    }
+
+
+# --------------------------------------------------------------------------
+# Per-player detail page
+# --------------------------------------------------------------------------
+def _player_link(athlete: dict) -> str:
+    for ln in athlete.get("links") or []:
+        if "playercard" in (ln.get("rel") or []) or ln.get("href"):
+            return ln.get("href", "")
+    return ""
+
+
+@cached(ttl_seconds=TTL_SPORTS_DETAIL)
+def fetch_player_detail(team_key: str, player_id: str):
+    team = TEAMS.get(team_key)
+    if not team or not player_id:
+        return None
+    sl = f"{team['sport']}/{team['league']}"
+
+    bio_data = get_json(f"{ATHLETE}/{sl}/athletes/{player_id}")
+    a = (bio_data or {}).get("athlete") if isinstance(bio_data, dict) else None
+    if not a:
+        return None
+
+    # Bio rows — only the ones ESPN actually filled in.
+    pairs = [
+        ("Position", (a.get("position") or {}).get("displayName")),
+        ("Number", a.get("displayJersey") or a.get("jersey")),
+        ("Height", a.get("displayHeight")),
+        ("Weight", a.get("displayWeight")),
+        ("Age", a.get("age")),
+        ("Experience", a.get("displayExperience")),
+        ("College", (a.get("college") or {}).get("name")),
+        ("Birthplace", a.get("displayBirthPlace")),
+        ("Draft", a.get("displayDraft")),
+    ]
+    bio = [{"k": k, "v": str(v)} for k, v in pairs if v not in (None, "", "0")]
+
+    # Season stats from the overview endpoint (labels × the first split).
+    ov = get_json(f"{ATHLETE}/{sl}/athletes/{player_id}/overview")
+    block = (ov or {}).get("statistics") if isinstance(ov, dict) else None
+    season = None
+    if block:
+        labels = block.get("labels") or []
+        splits = block.get("splits") or []
+        reg = next((s for s in splits if s.get("displayName") == "Regular Season"),
+                   splits[0] if splits else None)
+        vals = (reg or {}).get("stats") or []
+        if labels and vals:
+            season = {
+                "label": reg.get("displayName") or block.get("displayName") or "Season",
+                "stats": [{"k": labels[i], "v": vals[i]} for i in range(min(len(labels), len(vals)))],
+            }
+
+    return {
+        "kind": "player",
+        "teamKey": team_key,
+        "teamName": team["name"],
+        "color": team["color"],
+        "name": a.get("displayName") or a.get("fullName", ""),
+        "headshot": (a.get("headshot") or {}).get("href", ""),
+        "pos": (a.get("position") or {}).get("abbreviation", ""),
+        "num": a.get("displayJersey") or a.get("jersey", ""),
+        "summary": a.get("statsSummary") or {},
+        "bio": bio,
+        "season": season,
+        "link": _player_link(a),
     }
