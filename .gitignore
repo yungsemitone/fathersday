@@ -1,0 +1,13 @@
+# Python
+**/.venv/
+**/__pycache__/
+*.pyc
+
+# Secrets / local config
+**/.env
+
+# OS
+.DS_Store
+
+# Fly
+.fly/

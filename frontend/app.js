@@ -1,0 +1,390 @@
+/* =====================================================================
+   THE MORNING DESK — frontend logic
+   Fetches /api/dashboard on load; falls back to SAMPLE so the page always
+   renders. Sports cards open in-depth detail views fetched on demand.
+   ===================================================================== */
+
+/* Leave "" when the backend serves this file (same origin). If hosted
+   separately, set e.g. "https://your-desk.fly.dev". */
+const API_BASE = "";
+
+/* ---------------------------------------------------------------------
+   SAMPLE DATA — fallback only; the backend returns the same shapes.
+   --------------------------------------------------------------------- */
+const SAMPLE = {
+  markets: {
+    listName: "Watchlist",
+    watchlist: [
+      { t: "AAPL", name: "Apple", px: 232.18, chg: +1.24 },
+      { t: "MSFT", name: "Microsoft", px: 471.05, chg: +0.62 },
+      { t: "NVDA", name: "Nvidia", px: 138.55, chg: +2.41 },
+      { t: "JPM", name: "JPMorgan", px: 281.77, chg: +0.88 },
+      { t: "XOM", name: "Exxon", px: 118.92, chg: -1.07 },
+    ],
+    indices: [
+      { t: "S&P 500", px: 6128.40, chg: +0.43 },
+      { t: "Nasdaq", px: 19840.2, chg: +0.71 },
+      { t: "Dow", px: 43512.9, chg: +0.18 },
+      { t: "WTI Crude", px: 71.84, chg: -0.92 },
+      { t: "Gold", px: 2684.10, chg: +0.35 },
+      { t: "10Y Yield", px: 4.21, chg: +0.03, unit: "%" },
+    ],
+    macro: [
+      { k: "Fed funds", v: "3.63%", d: "held", dir: "neutral" },
+      { k: "Core CPI", v: "3.1%", d: "-0.2 vs prior", dir: "down" },
+      { k: "Unemployment", v: "4.3%", d: "unch", dir: "neutral" },
+      { k: "10Y–2Y", v: "+0.34", d: "steepening", dir: "up" },
+    ],
+  },
+  sports: [
+    { key: "lakers", league: "NBA", team: "Lakers", color: "#FDB927", abbr: "LAL", line: "53–29 · 1st in Pacific", detail: "Next: vs OKC · May 12", res: "" },
+    { key: "dodgers", league: "MLB", team: "Dodgers", color: "#005A9C", abbr: "LAD", line: "49–27 · 1st NL West", detail: "Next: vs BAL · Jun 21", res: "" },
+    { key: "usc", league: "NCAA", team: "USC Trojans", color: "#990000", abbr: "USC", line: "Football · preseason", detail: "Season opens late August", res: "" },
+    { key: "wsl", league: "WSL", team: "World Surf League", color: "#0AA1C4", abbr: "WSL", line: "Leaders: Colapinto · Picklum", detail: "Next: Corona Open J-Bay · Jul 9", res: "" },
+  ],
+  wine: [
+    { name: "Château Léoville Las Cases 2016", region: "St-Julien · 750ml", bid: 205, mkt: 295, left: "1d 4h", score: 98, critic: "RP" },
+    { name: "Château Montrose 2016", region: "St-Estèphe · 750ml", bid: 168, mkt: 240, left: "6h 12m", score: 99, critic: "JS" },
+    { name: "Ridge Monte Bello 2018", region: "Santa Cruz Mtns · 750ml", bid: 172, mkt: 235, left: "5h 41m", score: 97, critic: "WS" },
+    { name: "Dominus Estate 2018", region: "Napa · 750ml", bid: 268, mkt: 365, left: "9h 20m", score: 99, critic: "RP" },
+  ],
+  news: [
+    { src: "Reuters", h: "Fed holds rates, signals patience on cuts", s: "The committee kept its benchmark steady, citing still-elevated services inflation and a labor market that has cooled only gradually.", url: "#" },
+    { src: "Bloomberg", h: "Semiconductor shares slip on demand worries", s: "A pullback led by the chip complex weighed on the Nasdaq, with traders trimming exposure into quarter-end.", url: "#" },
+    { src: "WSJ", h: "Oil eases as supply picture loosens", s: "Crude gave back gains as inventories built more than expected and the demand outlook softened into summer.", url: "#" },
+  ],
+};
+
+/* ---------------------------------------------------------------------
+   Helpers
+   --------------------------------------------------------------------- */
+const fmt = n => Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const sign = n => (n >= 0 ? "+" : "") + Number(n).toFixed(2);
+const cls = n => (n >= 0 ? "up" : "down");
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const discPct = w => Math.round((1 - w.bid / w.mkt) * 100);
+
+function mdy(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  if (!d) return iso;
+  return `${Number(m)}/${Number(d)}`;
+}
+function weekday(iso) {
+  const dt = new Date(iso + "T12:00:00");
+  return isNaN(dt) ? iso : dt.toLocaleDateString("en-US", { weekday: "short" });
+}
+
+function quoteRow(o) {
+  const unit = o.unit || "";
+  const chg = (o.chg == null) ? "" : `<span class="chg ${cls(o.chg)}">${sign(o.chg)}%</span>`;
+  return `<div class="row">
+    <div><span class="tick">${esc(o.t)}</span>${o.name ? `<span class="name">${esc(o.name)}</span>` : ""}</div>
+    <div style="display:flex; gap:14px; align-items:baseline;">
+      <span class="num">${fmt(o.px)}${unit}</span>${chg}
+    </div>
+  </div>`;
+}
+
+let CARDS = SAMPLE.sports;   // current sports cards (for re-render)
+
+/* ---------------------------------------------------------------------
+   Render the dashboard (home + markets + wine + news + sports grid)
+   --------------------------------------------------------------------- */
+function render(data) {
+  const m = data.markets;
+  document.getElementById("watchlist").innerHTML = m.watchlist.map(quoteRow).join("");
+  document.getElementById("indices").innerHTML = m.indices.map(quoteRow).join("");
+  document.getElementById("watchlist-label").textContent = m.listName ? `Watchlist · ${m.listName}` : "Watchlist";
+
+  document.getElementById("macro-strip").innerHTML = m.macro.map(x => `
+    <div class="stat">
+      <div class="k">${esc(x.k)}</div>
+      <div class="v">${esc(x.v)}</div>
+      <div class="d" style="color:${x.dir === 'up' ? 'var(--up)' : x.dir === 'down' ? 'var(--down)' : 'var(--ink-3)'}">${esc(x.d)}</div>
+    </div>`).join("");
+
+  CARDS = data.sports;
+  renderSportsGrid(data.sports);
+
+  document.getElementById("wine-body").innerHTML = data.wine
+    .map(w => ({ ...w, disc: discPct(w) }))
+    .sort((a, b) => b.disc - a.disc)
+    .map(w => `
+      <tr>
+        <td><div class="wine-name">${esc(w.name)}${w.score ? `<span class="score-chip">${esc(w.score)}${w.critic ? " " + esc(w.critic) : ""}</span>` : ""}</div><div class="wine-sub">${esc(w.region)}</div></td>
+        <td class="mono">$${w.bid}</td>
+        <td class="mono" style="color:var(--ink-3)">$${w.mkt}</td>
+        <td class="mono" style="color:var(--ink-3)">${esc(w.left)}</td>
+        <td><span class="disc">−${w.disc}%</span></td>
+      </tr>`).join("");
+
+  document.getElementById("news-body").innerHTML = data.news.map(n => {
+    const href = n.url && n.url !== "#" ? esc(n.url) : null;
+    const inner = `
+      <div class="src"><span>${esc(n.src)}</span>${href ? '<span class="arrow">Read →</span>' : ""}</div>
+      <h4>${esc(n.h)}</h4>
+      <p>${esc(n.s)}</p>`;
+    return href
+      ? `<a class="story" href="${href}" target="_blank" rel="noopener">${inner}</a>`
+      : `<div class="story">${inner}</div>`;
+  }).join("");
+
+  // home dispatch summaries (derived)
+  const topGainer = [...m.watchlist].sort((a, b) => (b.chg || 0) - (a.chg || 0))[0];
+  const spx = m.indices.find(i => /S&P/i.test(i.t)) || m.indices[0];
+  const tenY = m.indices.find(i => /10Y/i.test(i.t));
+  document.getElementById("d-markets").textContent =
+    `${spx.t} ${sign(spx.chg)}%. ${topGainer.t} leads your list, ${sign(topGainer.chg)}%.` + (tenY ? ` 10Y at ${fmt(tenY.px)}%.` : "");
+  document.getElementById("d-sports").textContent =
+    data.sports.map(s => `${s.team.replace(" Trojans", "").replace("World Surf League", "WSL")}: ${s.line}`).slice(0, 2).join(" · ") + ".";
+  const bestWine = [...data.wine].map(w => ({ ...w, disc: discPct(w) })).sort((a, b) => b.disc - a.disc)[0];
+  document.getElementById("d-wine").textContent =
+    `${data.wine.length} lots (90+) below market. Best: ${bestWine.name.split(" ").slice(0, 3).join(" ")}… at −${bestWine.disc}%.`;
+  document.getElementById("d-news").textContent =
+    `${data.news[0].h}. ${data.news.length} stories on the wire.`;
+}
+
+/* ---------------------------------------------------------------------
+   Sports — home grid
+   --------------------------------------------------------------------- */
+function renderSportsGrid(cards) {
+  document.getElementById("sports-grid").innerHTML = cards.map(s => `
+    <div class="card link" tabindex="0" data-team="${esc(s.key)}">
+      <div class="score">
+        <div class="team">
+          <div class="badge" style="background:${esc(s.color)}">${esc(s.abbr)}</div>
+          <div>
+            <div style="font-family:'Fraunces',serif; font-weight:600; font-size:17px;">${esc(s.team)}</div>
+            <div class="result ${esc(s.res)}">${esc(s.line)}</div>
+          </div>
+        </div>
+        <span class="chip">${esc(s.league)}</span>
+      </div>
+      <div class="meta">${esc(s.detail)}</div>
+    </div>`).join("");
+
+  document.querySelectorAll("#sports-grid [data-team]").forEach(c => {
+    const go = () => openTeam(c.dataset.team);
+    c.addEventListener("click", go);
+    c.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
+}
+
+/* ---------------------------------------------------------------------
+   Sports — detail view
+   --------------------------------------------------------------------- */
+async function openTeam(key) {
+  const home = document.getElementById("sports-home");
+  const detail = document.getElementById("sports-detail");
+  home.style.display = "none";
+  detail.style.display = "block";
+  detail.innerHTML = `<button class="backlink" onclick="closeTeam()">← All teams</button><p class="empty">Loading…</p>`;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+
+  try {
+    const path = key === "wsl" ? "/api/wsl" : "/api/sports/" + key;
+    const res = await fetch(API_BASE + path, { cache: "no-store" });
+    if (!res.ok) throw new Error("bad status " + res.status);
+    const d = await res.json();
+    detail.innerHTML = (d.kind === "wsl" || key === "wsl") ? renderWsl(d) : renderTeam(d);
+    wireSubtabs(detail);
+  } catch (e) {
+    const card = CARDS.find(c => c.key === key) || {};
+    detail.innerHTML = `<button class="backlink" onclick="closeTeam()">← All teams</button>
+      <div class="detail-head"><div class="badge" style="background:${esc(card.color || '#888')}">${esc(card.abbr || '?')}</div>
+      <div><h2>${esc(card.team || key)}</h2><div class="rec">${esc(card.line || '')}</div></div></div>
+      <p class="empty">Couldn't load live detail right now. ${esc(card.detail || '')}</p>`;
+  }
+}
+
+function closeTeam() {
+  document.getElementById("sports-detail").style.display = "none";
+  document.getElementById("sports-home").style.display = "block";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+window.closeTeam = closeTeam;
+
+function detailHead(d) {
+  const rec = [d.record, d.standing].filter(Boolean).join(" · ");
+  return `<button class="backlink" onclick="closeTeam()">← All teams</button>
+    <div class="detail-head">
+      <div class="badge" style="background:${esc(d.color)}">${esc(d.abbr || "")}</div>
+      <div><h2>${esc(d.name)}</h2>${rec ? `<div class="rec">${esc(rec)}</div>` : ""}</div>
+    </div>`;
+}
+
+function subNav(tabs) {
+  const btns = tabs.map((t, i) =>
+    `<button class="subtab" role="tab" data-sub="${i}" aria-selected="${i === 0}">${esc(t)}</button>`).join("");
+  return `<nav class="subtabs" role="tablist">${btns}</nav>`;
+}
+
+function renderTeam(d) {
+  // News
+  const news = (d.news || []).length ? d.news.map(n => `
+    <a class="story" href="${esc(n.url)}" target="_blank" rel="noopener">
+      <div class="src"><span>ESPN</span><span class="arrow">Read →</span></div>
+      <h4>${esc(n.h)}</h4>${n.s ? `<p>${esc(n.s)}</p>` : ""}
+    </a>`).join("") : `<p class="empty">No recent stories.</p>`;
+
+  // Roster
+  const roster = (d.roster || []).length ? `<div class="roster-grid">` + d.roster.map(p => {
+    const meta = [p.num ? "#" + p.num : "", p.pos, p.ht, p.age ? p.age + "y" : ""].filter(Boolean).join(" · ");
+    const pic = p.headshot
+      ? `<img src="${esc(p.headshot)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`
+      : `<div class="badge" style="width:42px;height:42px;border-radius:50%;background:${esc(d.color)}">${esc(p.pos || "")}</div>`;
+    return `<div class="player">${pic}<div><div class="pname">${esc(p.name)}</div><div class="pmeta">${esc(meta)}</div></div></div>`;
+  }).join("") + `</div>` : `<p class="empty">Roster not posted yet.</p>`;
+
+  // Stats
+  const s = d.stats || {};
+  const splits = [["Overall", s.overall], ["Home", s.home], ["Away", s.road]].filter(x => x[1]);
+  const statCards = (s.stats || []).map(x => `<div class="stat"><div class="k">${esc(x.k)}</div><div class="v">${esc(x.v)}</div></div>`).join("");
+  const splitCards = splits.map(x => `<div class="stat"><div class="k">${esc(x[0])}</div><div class="v">${esc(x[1])}</div></div>`).join("");
+  const stats = (statCards || splitCards)
+    ? `<div class="statgrid">${splitCards}${statCards}</div>`
+    : `<p class="empty">Season stats appear once games are played.</p>`;
+
+  // Schedule
+  const sched = (d.schedule || []).length ? d.schedule.map(g => {
+    const res = g.completed
+      ? `<span class="sched-res ${g.res}">${esc(g.result || "")}</span>`
+      : `<span class="sched-res"><span class="upcoming-tag">Upcoming</span></span>`;
+    return `<div class="sched-row">
+      <span class="sched-when">${weekday(g.date)} ${mdy(g.date)}</span>
+      <span class="sched-match"><span class="opp">${esc(g.where)} ${esc(g.opp_name || g.opp)}</span></span>
+      ${res}</div>`;
+  }).join("") : `<p class="empty">No games on the schedule yet — offseason.</p>`;
+
+  return detailHead(d) + subNav(["News", "Roster", "Stats", "Schedule"]) +
+    `<div class="subpanel active">${news}</div>
+     <div class="subpanel">${roster}</div>
+     <div class="subpanel"><div class="card">${stats}</div></div>
+     <div class="subpanel"><div class="card">${sched}</div></div>`;
+}
+
+function renderWsl(d) {
+  const ne = d.nextEvent || {};
+  const fc = ne.forecast || [];
+  const head = `<button class="backlink" onclick="closeTeam()">← All teams</button>
+    <div class="detail-head"><div class="badge" style="background:${esc(d.color || '#0AA1C4')}">WSL</div>
+    <div><h2>${esc(d.name || "World Surf League")}</h2><div class="rec">Championship Tour 2026</div></div></div>`;
+
+  // Forecast
+  const swell = fc.length ? `<div class="swell-grid">` + fc.map(f => `
+    <div class="swell-day">
+      <div class="day">${weekday(f.date)}</div>
+      <div class="ht">${f.ft != null ? f.ft : "—"}<small>ft</small></div>
+      <div class="det">${f.period != null ? Math.round(f.period) + "s " : ""}${esc(f.dir || "")}</div>
+    </div>`).join("") + `</div>` : `<p class="empty">Forecast unavailable right now.</p>`;
+  const forecast = `<div class="card">
+      <p class="eyebrow" style="margin:0 0 4px;">Next event</p>
+      <h3 style="font-family:'Fraunces',serif;font-weight:600;font-size:20px;margin:0 0 2px;">${esc(ne.name || "")}</h3>
+      <p class="section-note" style="margin:0 0 16px;">${esc(ne.spot || "")}${ne.country ? " · " + esc(ne.country) : ""} · ${esc(ne.start || "")}</p>
+      ${swell}
+      <p class="footnote" style="margin-top:16px;">Live wave forecast (daily max) from Open-Meteo's Marine API for the event location.</p>
+    </div>`;
+
+  // Schedule + winners
+  const events = (d.events || []).map(ev => {
+    const win = ev.completed
+      ? `<span class="sched-res" style="text-align:right;min-width:auto"><span style="color:var(--gold)">🏆 ${esc(ev.men || "")}${ev.women ? " · " + esc(ev.women) : ""}</span></span>`
+      : `<span class="sched-res"><span class="upcoming-tag">Upcoming</span></span>`;
+    return `<div class="sched-row">
+      <span class="sched-when">${esc(mdy(ev.start))}</span>
+      <span class="sched-match"><span class="opp">${esc(ev.name)}</span><div class="meta" style="margin-top:2px">${esc(ev.spot)} · ${esc(ev.country)}</div></span>
+      ${win}</div>`;
+  }).join("");
+  const schedule = `<div class="card">${events}</div>`;
+
+  // Rankings
+  const rk = d.rankings || { men: [], women: [] };
+  const rankList = arr => arr.map(r => `
+    <div class="rank-row">
+      <span class="rank-no">${r.rank}</span>
+      <span class="rank-name">${esc(r.name)} <span class="rank-ctry">${esc(r.country)}</span></span>
+      <span class="rank-pts">${Number(r.points).toLocaleString()}</span>
+    </div>`).join("");
+  const rankings = `<div class="cols-2">
+      <div class="card"><p class="eyebrow" style="margin:0 0 10px;">Men's CT</p>${rankList(rk.men || [])}</div>
+      <div class="card"><p class="eyebrow" style="margin:0 0 10px;">Women's CT</p>${rankList(rk.women || [])}</div>
+    </div>`;
+
+  return head + subNav(["Forecast", "Schedule", "Rankings"]) +
+    `<div class="subpanel active">${forecast}</div>
+     <div class="subpanel">${schedule}</div>
+     <div class="subpanel">${rankings}</div>`;
+}
+
+function wireSubtabs(root) {
+  const tabs = [...root.querySelectorAll(".subtab")];
+  const panels = [...root.querySelectorAll(".subpanel")];
+  tabs.forEach(t => t.addEventListener("click", () => {
+    tabs.forEach(x => x.setAttribute("aria-selected", String(x === t)));
+    panels.forEach((p, i) => p.classList.toggle("active", i === Number(t.dataset.sub)));
+  }));
+}
+
+/* ---------------------------------------------------------------------
+   Boot: try live, fall back to sample
+   --------------------------------------------------------------------- */
+async function boot() {
+  let data = SAMPLE, live = false;
+  try {
+    const res = await fetch(API_BASE + "/api/dashboard", { cache: "no-store" });
+    if (res.ok) {
+      const j = await res.json();
+      const mk = j.markets || {};
+      data = {
+        markets: {
+          listName: mk.listName || SAMPLE.markets.listName,
+          watchlist: mk.watchlist || SAMPLE.markets.watchlist,
+          indices: mk.indices || SAMPLE.markets.indices,
+          macro: mk.macro || SAMPLE.markets.macro,
+        },
+        sports: j.sports || SAMPLE.sports,
+        wine: j.wine || SAMPLE.wine,
+        news: j.news || SAMPLE.news,
+      };
+      live = !!(j.markets || j.sports || j.wine || j.news);
+    }
+  } catch (e) { /* backend not up — keep sample */ }
+
+  render(data);
+  document.getElementById("data-status").textContent = live
+    ? "Live data connected."
+    : "Showing sample data — start the backend to go live. See README.";
+}
+
+/* ---- clock + greeting ---- */
+function refreshTime() {
+  const now = new Date();
+  const h = now.getHours();
+  const greet = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+  document.getElementById("greet").textContent = greet + ", Dad";
+  const dateStr = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const timeStr = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  document.getElementById("asof").textContent = "as of " + timeStr;
+  document.getElementById("hero-stamp").textContent = dateStr + " · " + timeStr + " PT";
+}
+
+/* ---- tabs ---- */
+const tabs = [...document.querySelectorAll(".tab")];
+const panels = [...document.querySelectorAll(".panel")];
+function show(id) {
+  tabs.forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === id)));
+  panels.forEach(p => p.classList.toggle("active", p.id === id));
+  if (id === "sports") closeTeam();   // always land on the team grid
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+tabs.forEach(t => t.addEventListener("click", () => show(t.dataset.tab)));
+document.querySelectorAll("[data-jump]").forEach(c => {
+  const go = () => show(c.dataset.jump);
+  c.addEventListener("click", go);
+  c.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+});
+
+refreshTime();
+setInterval(refreshTime, 30000);
+boot();
