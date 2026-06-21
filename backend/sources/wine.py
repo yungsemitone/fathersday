@@ -1,137 +1,274 @@
-"""Wine — "mispriced 90+ at K&L".
+"""Wine — live K&L auction lots, enriched with critic scores + market price.
 
-The idea Dad asked for: find bottles on the K&L auction marketplace whose
-current bid sits meaningfully below the wine's going market price — but only the
-*good* ones, i.e. wines a critic scored 90+.
+What Dad wanted: real, updating K&L auction lots, each with a critic rating, and
+the good ones (90+) surfaced as deals vs. their market price.
 
-Reality check: klwines.com sits behind bot protection and returns 403 to
-automated requests (including from cloud servers like Fly). So:
-  • _scrape_kl_auction() is wired and ready — it lights up if this ever runs
-    from an un-blocked IP (e.g. Dad's home machine / a residential proxy).
-  • Until then we use a curated cellar (data/wine_cellar.csv): real wines, real
-    critic scores (≥90), realistic K&L price points. Edit that file to track the
-    bottles Dad actually buys.
+How it works now:
+  1. Read the live K&L auctions page (shop.klwines.com) through the Cloudflare
+     unblocker (Scrapfly). It's a Next.js app, so every lot is in a clean
+     embedded JSON feed: name, vintage, current bid, # bids, end time, link.
+  2. For each lot, look up the wine on Wine-Searcher (also via the unblocker) to
+     get its aggregated **critic score** and **average market price**. These
+     never change, so they're cached *permanently* — each wine is only ever paid
+     for once — and the whole thing is capped to a monthly credit budget so the
+     free Scrapfly tier is never overrun.
+  3. The table shows every live lot; 90+ scored lots float to the top with their
+     score, market price, and discount. Scores fill in as the cache warms.
 
-Both paths run through the same filter — score ≥ 90 and bid ≥ MIN_DISCOUNT below
-market — so the logic is identical whether data is live or curated.
-
-Returns items shaped: { name, region, bid, mkt, left, score, critic }
-(the frontend computes discount % and sorts.)
+No SCRAPER_API_KEY (or K&L unreachable) -> falls back to the curated cellar.
 """
 from __future__ import annotations
 
 import csv
+import json
 import os
+import re
+import threading
+import time
+from datetime import datetime, timezone
 from urllib.parse import quote_plus
 
-from bs4 import BeautifulSoup
+from config import (
+    DATA_DIR,
+    KL_AUCTION_URL,
+    TTL_WINE,
+    WINE_SCORE_BUDGET_MONTH,
+    WINE_SCORE_PER_REFRESH,
+)
+from scraper import fetch_unblocked
 
-from cache import cached
-from config import TTL_WINE
-from httpc import get_text
+_HERE = os.path.dirname(__file__)
+CELLAR_CSV = os.path.join(_HERE, "..", "data", "wine_cellar.csv")
+SCORES_PATH = os.path.join(DATA_DIR or os.path.join(_HERE, "..", "data"), "wine_scores.json")
+
+MIN_DISCOUNT = 0.10   # flag lots ≥10% below market
+MIN_SCORE = 90        # Dad's bar
+DISPLAY_LIMIT = 18    # lots shown (and the pool we spend score lookups on)
+
+_lock = threading.Lock()
 
 
+# ---------------------------------------------------------------------------
+# Curated fallback (used when there's no scraper key / K&L is unreachable)
+# ---------------------------------------------------------------------------
 def _kl_search_url(name: str) -> str:
-    """A K&L marketplace search for the bottle (used when we lack a live lot URL)."""
     return f"https://www.klwines.com/Products?searchText={quote_plus(name)}"
-
-CELLAR_CSV = os.path.join(os.path.dirname(__file__), "..", "data", "wine_cellar.csv")
-KL_AUCTION_URL = "https://www.klwines.com/auctions"
-
-MIN_DISCOUNT = 0.12   # surface lots ≥12% below market
-MIN_SCORE = 90        # Dad's bar: critic score 90+
 
 
 def _load_cellar() -> list[dict]:
-    rows = []
+    out = []
     try:
         with open(CELLAR_CSV, newline="", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 try:
-                    rows.append({
-                        "name": f"{r['name'].strip()} {r['vintage'].strip()}".strip(),
-                        "region": r["region"].strip(),
-                        "bid": float(r["bid"]),
-                        "mkt": float(r["market_avg"]),
-                        "left": r.get("time_left", "").strip() or "—",
-                        "score": int(r["score"]),
-                        "critic": r.get("critic", "").strip(),
+                    bid, mkt, score = float(r["bid"]), float(r["market_avg"]), int(r["score"])
+                    if score < MIN_SCORE or bid >= mkt * (1 - MIN_DISCOUNT):
+                        continue
+                    name = f"{r['name'].strip()} {r['vintage'].strip()}".strip()
+                    out.append({
+                        "name": name,
+                        "region": f"{r['region'].strip()} · 750ml",
+                        "bid": round(bid), "mkt": round(mkt),
+                        "endDT": None, "left": r.get("time_left", "").strip() or "—",
+                        "nbids": None, "score": score, "critic": r.get("critic", "").strip(),
+                        "disc": round((1 - bid / mkt) * 100),
+                        "url": _kl_search_url(name),
                     })
                 except (KeyError, ValueError):
                     continue
     except FileNotFoundError:
         pass
-    return rows
-
-
-def _scrape_kl_auction() -> list[dict] | None:
-    """Best-effort live scrape. Returns None if blocked (the usual case)."""
-    html = get_text(KL_AUCTION_URL)
-    if not html:
-        return None
-    soup = BeautifulSoup(html, "html.parser")
-    lots = []
-    # Selectors are best-guess; confirm against the live markup when reachable.
-    for el in soup.select(".auction-item, .lot, .result-item"):
-        try:
-            name = el.select_one(".lot-title, .auction-item-name, h2, h3").get_text(strip=True)
-            bid_text = el.select_one(".current-bid, .price, .bid-amount").get_text(strip=True)
-            bid = float(bid_text.replace("$", "").replace(",", "").split()[0])
-            left_el = el.select_one(".time-left, .countdown, .ends")
-            lots.append({
-                "name": name,
-                "region": "",
-                "bid": bid,
-                "left": left_el.get_text(strip=True) if left_el else "—",
-                "score": None, "critic": "",
-            })
-        except (AttributeError, ValueError, IndexError):
-            continue
-    return lots or None
-
-
-def _qualify(rows: list[dict]) -> list[dict]:
-    """Keep 90+ scored lots trading ≥MIN_DISCOUNT below market."""
-    out = []
-    for r in rows:
-        score = r.get("score")
-        mkt = r.get("mkt")
-        if score is None or score < MIN_SCORE:
-            continue
-        if not mkt or r["bid"] >= mkt * (1 - MIN_DISCOUNT):
-            continue
-        out.append({
-            "name": r["name"],
-            "region": f"{r['region']} · 750ml" if r.get("region") else "750ml",
-            "bid": round(r["bid"]),
-            "mkt": round(mkt),
-            "left": r.get("left", "—"),
-            "score": score,
-            "critic": r.get("critic", ""),
-            # Real lot URL when scraped live; otherwise a K&L search for the bottle.
-            "url": r.get("url") or _kl_search_url(r["name"]),
-        })
-    out.sort(key=lambda w: (w["mkt"] - w["bid"]) / w["mkt"], reverse=True)
+    out.sort(key=lambda w: w["disc"], reverse=True)
     return out
 
 
-@cached(ttl_seconds=TTL_WINE)
-def fetch_wine():
-    # Live first (lights up when K&L is reachable); curated cellar otherwise.
-    live = _scrape_kl_auction()
-    if live:
-        # Live lots have no score yet — match names against the cellar to attach
-        # critic scores, then qualify. Anything we can't score is dropped.
-        cellar = {r["name"].lower(): r for r in _load_cellar()}
-        for lot in live:
-            match = cellar.get(lot["name"].lower())
-            if match:
-                lot["score"] = match["score"]
-                lot["critic"] = match["critic"]
-                lot["mkt"] = match["mkt"]
-                lot["region"] = match["region"]
-        qualified = _qualify([l for l in live if l.get("mkt")])
-        if qualified:
-            return qualified
+# ---------------------------------------------------------------------------
+# Persistent score cache + monthly credit budget
+# ---------------------------------------------------------------------------
+def _load_scores() -> dict:
+    try:
+        with open(SCORES_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, ValueError):
+        data = {}
+    data.setdefault("scores", {})
+    meta = data.setdefault("_meta", {"month": "", "lookups": 0})
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    if meta.get("month") != month:           # reset the budget each calendar month
+        meta["month"], meta["lookups"] = month, 0
+    return data
 
-    return _qualify(_load_cellar()) or None
+
+def _save_scores(data: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(SCORES_PATH), exist_ok=True)
+        tmp = SCORES_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, SCORES_PATH)
+    except OSError as e:
+        print("[wine] could not persist scores:", e)
+
+
+# ---------------------------------------------------------------------------
+# Wine-Searcher: aggregated critic score + average market price
+# ---------------------------------------------------------------------------
+def _ws_query(name: str) -> str:
+    q = name.split(",")[0]                    # drop the trailing ", Pauillac" etc.
+    q = q.replace('"', " ").replace("'", " ")
+    q = re.sub(r"\b(tasting lot|lot|owc|magnum|\d+ ?x ?\d+ml|750ml)\b", " ", q, flags=re.I)
+    return re.sub(r"\s+", " ", q).strip()
+
+
+def _ws_lookup(name: str) -> tuple[int | None, float | None]:
+    """Return (critic_score, avg_price) for a wine, or (None, None)."""
+    q = _ws_query(name)
+    if not q:
+        return None, None
+    html = fetch_unblocked(f"https://www.wine-searcher.com/find/{quote_plus(q)}")
+    if not html:
+        return None, None
+    m = (re.search(r'"criticScore"\s*:\s*"?(\d{2,3})', html)
+         or re.search(r'"aggregateRating".*?"ratingValue"\s*:\s*"?(\d{2,3})', html, re.S))
+    score = int(m.group(1)) if m else None
+    p = re.search(r"Avg Price[^$]*\$([0-9,]+)", html)
+    price = float(p.group(1).replace(",", "")) if p else None
+    return score, price
+
+
+# ---------------------------------------------------------------------------
+# Live K&L auction listing (Next.js __NEXT_DATA__ -> Algolia records)
+# ---------------------------------------------------------------------------
+def _kl_lots() -> list[dict] | None:
+    html = fetch_unblocked(KL_AUCTION_URL, timeout=180.0)
+    if not html:
+        return None
+    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.S)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+        queries = data["props"]["pageProps"]["dehydratedState"]["queries"]
+    except (KeyError, ValueError, TypeError):
+        return None
+
+    records = None
+    for q in queries:
+        d = (q.get("state") or {}).get("data")
+        if isinstance(d, dict) and isinstance(d.get("records"), list):
+            records = d["records"]
+            break
+    if not records:
+        return None
+
+    lots = []
+    for w in records:
+        r = w.get("record") if isinstance(w, dict) else None
+        if not isinstance(r, dict) or not r.get("sku"):
+            continue
+        bid = r.get("winningBidAmount") or r.get("listPrice")
+        if not bid:
+            continue
+        # Fold the vintage into the name when itemName omits it (helps WS match).
+        iname = (r.get("itemName") or "").strip()
+        vp = (r.get("lotVintagePrefix") or "").strip()
+        if vp and not iname[:4].strip().isdigit() and not iname.lower().startswith(vp.lower()):
+            iname = f"{vp} {iname}"
+        count = int(r.get("lotItemCount") or 1) or 1
+        region = " · ".join([p for p in [
+            r.get("specificAppellation") or r.get("subRegion") or r.get("country"),
+            r.get("varietal"), r.get("containerType"),
+        ] if p])
+        lots.append({
+            "sku": str(r["sku"]),
+            "name": iname,
+            "region": region,
+            "bid": round(float(bid)),
+            "count": count,
+            "nbids": r.get("numberBids") or 0,
+            "endDT": r.get("auctionEndDT"),
+            "url": f"https://shop.klwines.com/auctions/bidding/{r['sku']}",
+        })
+    return lots or None
+
+
+# ---------------------------------------------------------------------------
+# Orchestration
+# ---------------------------------------------------------------------------
+def _build_live() -> list[dict] | None:
+    """The slow path: live K&L listing + Wine-Searcher enrichment. Runs in a
+    background thread (it can take minutes), never on the request path."""
+    lots = _kl_lots()
+    if not lots:
+        return None
+
+    # Soonest-ending first; that's both the most useful view and the pool we
+    # spend score lookups on.
+    lots.sort(key=lambda l: l.get("endDT") or "")
+    pool = lots[:DISPLAY_LIMIT]
+
+    with _lock:
+        store = _load_scores()
+        scores, meta = store["scores"], store["_meta"]
+        looked = 0
+        for lot in pool:
+            key = re.sub(r"\s+", " ", lot["name"].lower()).strip()
+            hit = scores.get(key)
+            if hit is None and looked < WINE_SCORE_PER_REFRESH and meta["lookups"] < WINE_SCORE_BUDGET_MONTH:
+                sc, pr = _ws_lookup(lot["name"])
+                hit = scores[key] = {"score": sc, "price": pr, "ts": int(time.time())}
+                meta["lookups"] += 1
+                looked += 1
+            if hit:
+                lot["score"] = hit.get("score")
+                lot["mkt"] = round(hit["price"]) if hit.get("price") else None
+        _save_scores(store)
+
+    # Enrich: discount where we have a market price + a quality score. Compare
+    # per-bottle (lots can be multi-bottle) against Wine-Searcher's per-750ml avg.
+    for lot in pool:
+        score, mkt = lot.get("score"), lot.get("mkt")
+        per_bottle = lot["bid"] / max(lot.get("count", 1), 1)
+        if score and score >= MIN_SCORE and mkt and per_bottle < mkt * (1 - MIN_DISCOUNT):
+            lot["disc"] = round((1 - per_bottle / mkt) * 100)
+            lot["critic"] = "WS"
+        else:
+            lot["disc"] = None
+
+    # 90+ deals first (best discount), then the rest of the live board (ending soonest).
+    deals = [l for l in pool if l.get("disc") is not None]
+    rest = [l for l in pool if l.get("disc") is None]
+    deals.sort(key=lambda l: l["disc"], reverse=True)
+    return deals + rest
+
+
+# ---------------------------------------------------------------------------
+# Public entry — non-blocking. Serves the last live result instantly and
+# refreshes in the background (the live build can take minutes).
+# ---------------------------------------------------------------------------
+_RESULT: dict = {"data": None, "at": 0.0}
+_refresh_lock = threading.Lock()
+
+
+def _refresh() -> None:
+    if not _refresh_lock.acquire(blocking=False):
+        return                              # a refresh is already running
+    try:
+        data = _build_live()
+        if data:
+            _RESULT["data"], _RESULT["at"] = data, time.time()
+    except Exception as e:                   # noqa: BLE001
+        print("[wine] refresh failed:", e)
+    finally:
+        _refresh_lock.release()
+
+
+def warm() -> None:
+    """Kick a background refresh (called once at app startup)."""
+    threading.Thread(target=_refresh, daemon=True).start()
+
+
+def fetch_wine():
+    if time.time() - _RESULT["at"] > TTL_WINE and not _refresh_lock.locked():
+        warm()
+    return _RESULT["data"] or _load_cellar() or None

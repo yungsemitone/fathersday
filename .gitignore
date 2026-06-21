@@ -6,6 +6,9 @@
 # Secrets / local config
 **/.env
 
+# Runtime wine score cache (persisted to the Fly volume in prod)
+**/wine_scores.json
+
 # OS
 .DS_Store
 

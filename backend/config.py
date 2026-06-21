@@ -26,6 +26,19 @@ FEATURED_WATCHLIST = os.getenv("FEATURED_WATCHLIST", "")
 # the *frontend* URL, not STOCK_API_BASE (which is the backend API).
 STOCK_DASHBOARD_URL = os.getenv("STOCK_DASHBOARD_URL", "")
 
+# --- Wine: K&L auctions sit behind Cloudflare, so fetch them through an
+# unblocker service (scraperapi | scrapingbee | scrapfly | zenrows). Without a
+# key, the wine section uses the curated cellar.
+SCRAPER_PROVIDER = os.getenv("SCRAPER_PROVIDER", "scrapfly")
+SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "")
+KL_AUCTION_URL = os.getenv("KL_AUCTION_URL", "https://shop.klwines.com/products/auctions")
+
+# Critic scores + market price come from Wine-Searcher (via the unblocker), are
+# cached permanently per wine, and are budget-capped so the free Scrapfly tier
+# (1,000 credits/mo) is never overrun. Each lookup costs ~6 credits.
+WINE_SCORE_PER_REFRESH = int(os.getenv("WINE_SCORE_PER_REFRESH", "12"))
+WINE_SCORE_BUDGET_MONTH = int(os.getenv("WINE_SCORE_BUDGET_MONTH", "100"))
+
 # --- CORS (only needed if the frontend is hosted on another origin) ---------
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
 
@@ -39,4 +52,4 @@ TTL_SPORTS = 600      # scores/rosters change slowly intraday
 TTL_SPORTS_DETAIL = 900
 TTL_WSL = 3600        # tour data is stable; swell refetched within
 TTL_SWELL = 3600      # marine forecast hourly is plenty
-TTL_WINE = 1800       # auctions move slowly; be polite to K&L
+TTL_WINE = 43200      # 12h: auctions move over days; keeps unblocker credit use low

@@ -74,6 +74,15 @@ function weekday(iso) {
   const dt = new Date(iso + "T12:00:00");
   return isNaN(dt) ? iso : dt.toLocaleDateString("en-US", { weekday: "short" });
 }
+function endsIn(iso) {
+  const ms = new Date(iso) - new Date();
+  if (isNaN(ms)) return "—";
+  if (ms <= 0) return "Ended";
+  const h = Math.floor(ms / 3.6e6), m = Math.floor((ms % 3.6e6) / 6e4);
+  if (h >= 24) return Math.floor(h / 24) + "d " + (h % 24) + "h";
+  if (h >= 1) return h + "h " + m + "m";
+  return m + "m";
+}
 
 function quoteRow(o) {
   const unit = o.unit || "";
@@ -118,21 +127,22 @@ function render(data) {
   CARDS = data.sports;
   renderSportsGrid(data.sports);
 
-  document.getElementById("wine-body").innerHTML = data.wine
-    .map(w => ({ ...w, disc: discPct(w) }))
-    .sort((a, b) => b.disc - a.disc)
-    .map(w => {
-      const href = w.url || ("https://www.klwines.com/Products?searchText=" + encodeURIComponent(w.name));
-      const chip = w.score ? `<span class="score-chip">${esc(w.score)}${w.critic ? " " + esc(w.critic) : ""}</span>` : "";
-      return `
+  // Keep backend order (90+ deals first, then the live board ending soonest).
+  document.getElementById("wine-body").innerHTML = data.wine.map(w => {
+    const disc = (w.disc != null) ? w.disc : (w.mkt && w.bid < w.mkt ? Math.round((1 - w.bid / w.mkt) * 100) : null);
+    const href = w.url || ("https://www.klwines.com/Products?searchText=" + encodeURIComponent(w.name));
+    const chip = (w.score && w.score >= 90) ? `<span class="score-chip">${esc(w.score)} ${esc(w.critic || "WS")}</span>` : "";
+    const cnt = (w.count && w.count > 1) ? ` <span style="color:var(--ink-3)">×${w.count}</span>` : "";
+    const ends = w.endDT ? endsIn(w.endDT) : (w.left || "—");
+    return `
       <tr>
         <td><a class="wine-name" href="${esc(href)}" target="_blank" rel="noopener">${esc(w.name)}</a>${chip}<div class="wine-sub">${esc(w.region)}</div></td>
-        <td class="mono">$${w.bid}</td>
-        <td class="mono" style="color:var(--ink-3)">$${w.mkt}</td>
-        <td class="mono" style="color:var(--ink-3)">${esc(w.left)}</td>
-        <td><span class="disc">−${w.disc}%</span></td>
+        <td class="mono">$${w.bid}${cnt}</td>
+        <td class="mono" style="color:var(--ink-3)">${w.mkt ? "$" + w.mkt : "—"}</td>
+        <td class="mono" style="color:var(--ink-3)">${esc(ends)}</td>
+        <td>${disc != null ? `<span class="disc">−${disc}%</span>` : '<span style="color:var(--ink-3)">—</span>'}</td>
       </tr>`;
-    }).join("");
+  }).join("");
 
   document.getElementById("news-body").innerHTML = data.news.map(n => {
     const href = n.url && n.url !== "#" ? esc(n.url) : null;
@@ -153,9 +163,15 @@ function render(data) {
     `${spx.t} ${sign(spx.chg)}%. ${topGainer.t} leads your list, ${sign(topGainer.chg)}%.` + (tenY ? ` 10Y at ${fmt(tenY.px)}%.` : "");
   document.getElementById("d-sports").textContent =
     data.sports.map(s => `${s.team.replace(" Trojans", "").replace("World Surf League", "WSL")}: ${s.line}`).slice(0, 2).join(" · ") + ".";
-  const bestWine = [...data.wine].map(w => ({ ...w, disc: discPct(w) })).sort((a, b) => b.disc - a.disc)[0];
-  document.getElementById("d-wine").textContent =
-    `${data.wine.length} lots (90+) below market. Best: ${bestWine.name.split(" ").slice(0, 3).join(" ")}… at −${bestWine.disc}%.`;
+  const deals = data.wine.filter(w => w.disc != null);
+  if (deals.length) {
+    const best = deals[0]; // backend puts the best discount first
+    document.getElementById("d-wine").textContent =
+      `${deals.length} mispriced 90+ lots at K&L. Best: ${best.name.split(" ").slice(0, 3).join(" ")}… −${best.disc}%.`;
+  } else {
+    document.getElementById("d-wine").textContent =
+      `${data.wine.length} live lots up at K&L auction. Tap through to bid.`;
+  }
   document.getElementById("d-news").textContent =
     `${data.news[0].h}. ${data.news.length} stories on the wire.`;
 }

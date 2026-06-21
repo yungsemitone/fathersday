@@ -44,6 +44,28 @@ the Markets tab's "Open the full Stock Dashboard" button works:
 fly secrets set STOCK_DASHBOARD_URL=https://<your-dashboard>.vercel.app
 ```
 
+## Live wine (K&L auctions via Scrapfly)
+
+The wine section reads **live K&L auction lots** and enriches each with a critic
+score + market price from Wine-Searcher, through the Scrapfly unblocker (K&L and
+Wine-Searcher both block plain servers via Cloudflare).
+
+```bash
+# 1. The Scrapfly key is a secret:
+fly secrets set SCRAPER_API_KEY=scp-live-xxxxxxxx   # SCRAPER_PROVIDER=scrapfly is in fly.toml
+
+# 2. A small volume persists the score cache so scores aren't re-bought each deploy
+#    (create it once, same region as the app):
+fly volumes create data --size 1 --region lax -a dad-dashboard
+```
+
+Credit budgeting (free Scrapfly tier = 1,000 credits/month, ~6 credits/lookup):
+`fly.toml`/env knobs `WINE_SCORE_PER_REFRESH` (default 12) and
+`WINE_SCORE_BUDGET_MONTH` (default 100) cap spend so it never overruns. Every lot
+still shows live; critic scores fill in within budget and are cached forever.
+To score **every** lot on every refresh, bump those and move to a paid Scrapfly
+tier (~$30/mo = 200k credits). Without a key, the section uses the curated cellar.
+
 ## Deploy
 
 ```bash

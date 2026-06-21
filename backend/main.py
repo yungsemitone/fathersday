@@ -22,7 +22,7 @@ from config import CORS_ORIGINS, STOCK_DASHBOARD_URL
 from sources.markets import fetch_markets
 from sources.news import fetch_news
 from sources.sports import TEAMS, fetch_player_detail, fetch_sports, fetch_team_detail
-from sources.wine import fetch_wine
+from sources.wine import fetch_wine, warm as warm_wine
 from sources.wsl import fetch_wsl
 
 app = FastAPI(title="The Morning Desk")
@@ -102,6 +102,11 @@ def wsl():
 @app.get("/api/wine")
 def wine():
     return JSONResponse({"wine": _safe(fetch_wine)})
+
+
+@app.on_event("startup")
+def _startup():
+    warm_wine()  # begin warming the live K&L wine data in the background
 
 
 @app.get("/api/health")
