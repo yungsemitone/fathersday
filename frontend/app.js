@@ -127,22 +127,28 @@ function render(data) {
   CARDS = data.sports;
   renderSportsGrid(data.sports);
 
-  // Keep backend order (90+ deals first, then the live board ending soonest).
-  document.getElementById("wine-body").innerHTML = data.wine.map(w => {
-    const disc = (w.disc != null) ? w.disc : (w.mkt && w.bid < w.mkt ? Math.round((1 - w.bid / w.mkt) * 100) : null);
-    const href = w.url || ("https://www.klwines.com/Products?searchText=" + encodeURIComponent(w.name));
-    const chip = (w.score && w.score >= 90) ? `<span class="score-chip">${esc(w.score)} ${esc(w.critic || "WS")}</span>` : "";
-    const cnt = (w.count && w.count > 1) ? ` <span style="color:var(--ink-3)">×${w.count}</span>` : "";
-    const ends = w.endDT ? endsIn(w.endDT) : (w.left || "—");
-    return `
-      <tr>
-        <td><a class="wine-name" href="${esc(href)}" target="_blank" rel="noopener">${esc(w.name)}</a>${chip}<div class="wine-sub">${esc(w.region)}</div></td>
-        <td class="mono">$${w.bid}${cnt}</td>
-        <td class="mono" style="color:var(--ink-3)">${w.mkt ? "$" + w.mkt : "—"}</td>
-        <td class="mono" style="color:var(--ink-3)">${esc(ends)}</td>
-        <td>${disc != null ? `<span class="disc">−${disc}%</span>` : '<span style="color:var(--ink-3)">—</span>'}</td>
-      </tr>`;
-  }).join("");
+  // Backend already returns only qualifying deals (95+, FR/IT/ES/AU, below
+  // market), best discount first. Hide any that ended since the last refresh.
+  const wines = (data.wine || []).filter(w => !w.endDT || endsIn(w.endDT) !== "Ended");
+  const body = document.getElementById("wine-body");
+  if (!wines.length) {
+    body.innerHTML = `<tr><td colspan="5" style="padding:28px 10px; text-align:center; color:var(--ink-3); font-style:italic;">No 95+ deals from France, Italy, Spain or Australia below market right now — the desk keeps watching.</td></tr>`;
+  } else {
+    body.innerHTML = wines.map(w => {
+      const href = w.url || ("https://www.klwines.com/Products?searchText=" + encodeURIComponent(w.name));
+      const chip = w.score ? `<span class="score-chip">${esc(w.score)} ${esc(w.critic || "WS")}</span>` : "";
+      const cnt = (w.count && w.count > 1) ? ` <span style="color:var(--ink-3)">×${w.count}</span>` : "";
+      const ends = w.endDT ? endsIn(w.endDT) : (w.left || "—");
+      return `
+        <tr>
+          <td><a class="wine-name" href="${esc(href)}" target="_blank" rel="noopener">${esc(w.name)}</a>${chip}<div class="wine-sub">${esc(w.region)}</div></td>
+          <td class="mono">$${w.bid}${cnt}</td>
+          <td class="mono" style="color:var(--ink-3)">${w.mkt ? "$" + w.mkt : "—"}</td>
+          <td class="mono" style="color:var(--ink-3)">${esc(ends)}</td>
+          <td>${w.disc != null ? `<span class="disc">−${w.disc}%</span>` : '<span style="color:var(--ink-3)">—</span>'}</td>
+        </tr>`;
+    }).join("");
+  }
 
   document.getElementById("news-body").innerHTML = data.news.map(n => {
     const href = n.url && n.url !== "#" ? esc(n.url) : null;
@@ -163,14 +169,14 @@ function render(data) {
     `${spx.t} ${sign(spx.chg)}%. ${topGainer.t} leads your list, ${sign(topGainer.chg)}%.` + (tenY ? ` 10Y at ${fmt(tenY.px)}%.` : "");
   document.getElementById("d-sports").textContent =
     data.sports.map(s => `${s.team.replace(" Trojans", "").replace("World Surf League", "WSL")}: ${s.line}`).slice(0, 2).join(" · ") + ".";
-  const deals = data.wine.filter(w => w.disc != null);
+  const deals = (data.wine || []).filter(w => w.disc != null && (!w.endDT || endsIn(w.endDT) !== "Ended"));
   if (deals.length) {
     const best = deals[0]; // backend puts the best discount first
     document.getElementById("d-wine").textContent =
-      `${deals.length} mispriced 90+ lots at K&L. Best: ${best.name.split(" ").slice(0, 3).join(" ")}… −${best.disc}%.`;
+      `${deals.length} K&L deal${deals.length > 1 ? "s" : ""} (95+, EU/Aus) below market. Best: ${best.name.split(" ").slice(0, 3).join(" ")}… −${best.disc}%.`;
   } else {
     document.getElementById("d-wine").textContent =
-      `${data.wine.length} live lots up at K&L auction. Tap through to bid.`;
+      "No 95+ deals from France, Italy, Spain or Australia below market right now.";
   }
   document.getElementById("d-news").textContent =
     `${data.news[0].h}. ${data.news.length} stories on the wire.`;
@@ -444,7 +450,7 @@ async function boot() {
           macro: mk.macro || SAMPLE.markets.macro,
         },
         sports: j.sports || SAMPLE.sports,
-        wine: j.wine || SAMPLE.wine,
+        wine: Array.isArray(j.wine) ? j.wine : SAMPLE.wine,  // [] = "no deals", keep it
         news: j.news || SAMPLE.news,
       };
       DASH_URL = j.dashboardUrl || "";

@@ -12,10 +12,12 @@ How it works now:
      never change, so they're cached *permanently* — each wine is only ever paid
      for once — and the whole thing is capped to a monthly credit budget so the
      free Scrapfly tier is never overrun.
-  3. The table shows every live lot; 90+ scored lots float to the top with their
-     score, market price, and discount. Scores fill in as the cache warms.
+  3. We surface only genuine *deals*: wines from Dad's regions (France, Italy,
+     Spain, Australia) scored 95+ whose per-bottle bid is below Wine-Searcher's
+     market price, still live (not ended), sorted by discount.
 
-No SCRAPER_API_KEY (or K&L unreachable) -> falls back to the curated cellar.
+Filtering to those countries happens BEFORE scoring, so credits are only spent
+on relevant lots. No SCRAPER_API_KEY (or K&L unreachable) -> curated cellar.
 """
 from __future__ import annotations
 
@@ -32,6 +34,9 @@ from config import (
     DATA_DIR,
     KL_AUCTION_URL,
     TTL_WINE,
+    WINE_COUNTRIES,
+    WINE_MIN_DISCOUNT,
+    WINE_MIN_SCORE,
     WINE_SCORE_BUDGET_MONTH,
     WINE_SCORE_PER_REFRESH,
 )
@@ -41,11 +46,16 @@ _HERE = os.path.dirname(__file__)
 CELLAR_CSV = os.path.join(_HERE, "..", "data", "wine_cellar.csv")
 SCORES_PATH = os.path.join(DATA_DIR or os.path.join(_HERE, "..", "data"), "wine_scores.json")
 
-MIN_DISCOUNT = 0.10   # flag lots ≥10% below market
-MIN_SCORE = 90        # Dad's bar
-DISPLAY_LIMIT = 18    # lots shown (and the pool we spend score lookups on)
+MIN_DISCOUNT = WINE_MIN_DISCOUNT   # ≥X% below market to count as a deal
+MIN_SCORE = WINE_MIN_SCORE         # critic-score floor (Dad: 95+)
+COUNTRIES = set(WINE_COUNTRIES)    # only these origins (Dad: FR/IT/ES/AU)
+MAX_DEALS = 15                     # cap the displayed deals
 
 _lock = threading.Lock()
+
+
+def _country_ok(country: str) -> bool:
+    return (country or "").strip().lower() in COUNTRIES
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +73,8 @@ def _load_cellar() -> list[dict]:
                 try:
                     bid, mkt, score = float(r["bid"]), float(r["market_avg"]), int(r["score"])
                     if score < MIN_SCORE or bid >= mkt * (1 - MIN_DISCOUNT):
+                        continue
+                    if not _country_ok(r.get("country", "")):
                         continue
                     name = f"{r['name'].strip()} {r['vintage'].strip()}".strip()
                     out.append({
@@ -183,6 +195,7 @@ def _kl_lots() -> list[dict] | None:
             "sku": str(r["sku"]),
             "name": iname,
             "region": region,
+            "country": (r.get("country") or "").strip(),
             "bid": round(float(bid)),
             "count": count,
             "nbids": r.get("numberBids") or 0,
@@ -195,23 +208,37 @@ def _kl_lots() -> list[dict] | None:
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
+def _active(lot: dict) -> bool:
+    """True if the auction hasn't ended yet."""
+    end = lot.get("endDT")
+    if not end:
+        return True
+    try:
+        return datetime.fromisoformat(end.replace("Z", "+00:00")) > datetime.now(timezone.utc)
+    except ValueError:
+        return True
+
+
 def _build_live() -> list[dict] | None:
     """The slow path: live K&L listing + Wine-Searcher enrichment. Runs in a
-    background thread (it can take minutes), never on the request path."""
+    background thread (it can take minutes), never on the request path.
+
+    Returns a list of qualifying deals (possibly empty) on success, or None if
+    the listing couldn't be fetched at all (so the caller can fall back)."""
     lots = _kl_lots()
-    if not lots:
+    if lots is None:
         return None
 
-    # Soonest-ending first; that's both the most useful view and the pool we
-    # spend score lookups on.
-    lots.sort(key=lambda l: l.get("endDT") or "")
-    pool = lots[:DISPLAY_LIMIT]
+    # Only Dad's regions + still-live auctions, BEFORE we spend any score
+    # lookups. (The ending-soonest feed is ~85% US, so this matters.)
+    candidates = [l for l in lots if _country_ok(l["country"]) and _active(l)]
+    candidates.sort(key=lambda l: l.get("endDT") or "")
 
     with _lock:
         store = _load_scores()
         scores, meta = store["scores"], store["_meta"]
         looked = 0
-        for lot in pool:
+        for lot in candidates:
             key = re.sub(r"\s+", " ", lot["name"].lower()).strip()
             hit = scores.get(key)
             if hit is None and looked < WINE_SCORE_PER_REFRESH and meta["lookups"] < WINE_SCORE_BUDGET_MONTH:
@@ -224,22 +251,22 @@ def _build_live() -> list[dict] | None:
                 lot["mkt"] = round(hit["price"]) if hit.get("price") else None
         _save_scores(store)
 
-    # Enrich: discount where we have a market price + a quality score. Compare
-    # per-bottle (lots can be multi-bottle) against Wine-Searcher's per-750ml avg.
-    for lot in pool:
+    # Keep only genuine deals: 95+ AND per-bottle bid meaningfully below the
+    # Wine-Searcher market price (lots can be multi-bottle).
+    deals = []
+    for lot in candidates:
         score, mkt = lot.get("score"), lot.get("mkt")
+        if not (score and score >= MIN_SCORE and mkt):
+            continue
         per_bottle = lot["bid"] / max(lot.get("count", 1), 1)
-        if score and score >= MIN_SCORE and mkt and per_bottle < mkt * (1 - MIN_DISCOUNT):
-            lot["disc"] = round((1 - per_bottle / mkt) * 100)
-            lot["critic"] = "WS"
-        else:
-            lot["disc"] = None
+        if per_bottle >= mkt * (1 - MIN_DISCOUNT):
+            continue
+        lot["disc"] = round((1 - per_bottle / mkt) * 100)
+        lot["critic"] = "WS"
+        deals.append(lot)
 
-    # 90+ deals first (best discount), then the rest of the live board (ending soonest).
-    deals = [l for l in pool if l.get("disc") is not None]
-    rest = [l for l in pool if l.get("disc") is None]
     deals.sort(key=lambda l: l["disc"], reverse=True)
-    return deals + rest
+    return deals[:MAX_DEALS]
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +282,7 @@ def _refresh() -> None:
         return                              # a refresh is already running
     try:
         data = _build_live()
-        if data:
+        if data is not None:                 # [] (no deals) is a valid result
             _RESULT["data"], _RESULT["at"] = data, time.time()
     except Exception as e:                   # noqa: BLE001
         print("[wine] refresh failed:", e)
@@ -271,4 +298,8 @@ def warm() -> None:
 def fetch_wine():
     if time.time() - _RESULT["at"] > TTL_WINE and not _refresh_lock.locked():
         warm()
-    return _RESULT["data"] or _load_cellar() or None
+    # Once warmed, serve the live deals (even an empty list -> "no deals" state).
+    # Before the first successful warm, show the curated cellar.
+    if _RESULT["data"] is not None:
+        return _RESULT["data"]
+    return _load_cellar()

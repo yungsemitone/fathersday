@@ -39,6 +39,12 @@ KL_AUCTION_URL = os.getenv("KL_AUCTION_URL", "https://shop.klwines.com/products/
 WINE_SCORE_PER_REFRESH = int(os.getenv("WINE_SCORE_PER_REFRESH", "12"))
 WINE_SCORE_BUDGET_MONTH = int(os.getenv("WINE_SCORE_BUDGET_MONTH", "100"))
 
+# What qualifies as a wine "deal" to surface (Dad's rules):
+WINE_MIN_SCORE = int(os.getenv("WINE_MIN_SCORE", "95"))            # critic 95+
+WINE_MIN_DISCOUNT = float(os.getenv("WINE_MIN_DISCOUNT", "0.05"))  # ≥5% below market
+WINE_COUNTRIES = [c.strip().lower() for c in
+                  os.getenv("WINE_COUNTRIES", "France,Italy,Spain,Australia").split(",")]
+
 # --- CORS (only needed if the frontend is hosted on another origin) ---------
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
 
