@@ -77,6 +77,23 @@ fly logs            # watch it boot / debug
 Re-deploy any time with `fly deploy`. To change the curated wine list or WSL
 data, edit the files and re-deploy.
 
+## Auto-deploy (push to deploy — no manual `fly deploy`)
+
+`.github/workflows/fly-deploy.yml` deploys on every push to `main`. One-time setup:
+
+```bash
+# 1. Create a Fly deploy token scoped to this app:
+fly tokens create deploy -a dad-dashboard
+```
+
+```
+# 2. Add it to GitHub:  repo  ->  Settings  ->  Secrets and variables  ->  Actions
+#    ->  New repository secret  ->  name: FLY_API_TOKEN, value: (the token, incl. the "FlyV1 ..." prefix)
+```
+
+After that, `git push` deploys automatically (watch it in the repo's **Actions** tab).
+The volume + secrets persist across deploys, so you set those once.
+
 ## Hand-off
 
 Print a little card with the URL for Dad. That's the gift. 🎁

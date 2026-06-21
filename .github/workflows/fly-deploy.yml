@@ -1,0 +1,20 @@
+name: Deploy to Fly.io
+
+# Auto-deploys The Morning Desk on every push to main — no manual `fly deploy`.
+# Requires one repo secret: FLY_API_TOKEN (see DEPLOY.md / the steps below).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # also lets you trigger a deploy by hand from the Actions tab
+
+jobs:
+  deploy:
+    name: fly deploy
+    runs-on: ubuntu-latest
+    concurrency: deploy-group   # never run two deploys at once
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
