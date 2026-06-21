@@ -137,13 +137,19 @@ function render(data) {
     body.innerHTML = wines.map(w => {
       const href = w.url || ("https://www.klwines.com/Products?searchText=" + encodeURIComponent(w.name));
       const chip = w.score ? `<span class="score-chip">${esc(w.score)} ${esc(w.critic || "WS")}</span>` : "";
-      const cnt = (w.count && w.count > 1) ? ` <span style="color:var(--ink-3)">×${w.count}</span>` : "";
+      const count = w.count || 1;
+      const cnt = (count > 1) ? ` <span style="color:var(--ink-3)">×${count}</span>` : "";
       const ends = w.endDT ? endsIn(w.endDT) : (w.left || "—");
+      // Compare like-for-like: the lot's market value = per-bottle market × bottles.
+      const mktLot = w.mkt ? Math.round(w.mkt * count) : null;
+      const mktCell = mktLot
+        ? `$${mktLot}${count > 1 ? `<div class="wine-sub">$${w.mkt}/btl</div>` : ""}`
+        : "—";
       return `
         <tr>
           <td><a class="wine-name" href="${esc(href)}" target="_blank" rel="noopener">${esc(w.name)}</a>${chip}<div class="wine-sub">${esc(w.region)}</div></td>
           <td class="mono">$${w.bid}${cnt}</td>
-          <td class="mono" style="color:var(--ink-3)">${w.mkt ? "$" + w.mkt : "—"}</td>
+          <td class="mono" style="color:var(--ink-3)">${mktCell}</td>
           <td class="mono" style="color:var(--ink-3)">${esc(ends)}</td>
           <td>${w.disc != null ? `<span class="disc">−${w.disc}%</span>` : '<span style="color:var(--ink-3)">—</span>'}</td>
         </tr>`;
