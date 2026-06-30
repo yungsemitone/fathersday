@@ -44,6 +44,17 @@ FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 VALID_TEAMS = set(TEAMS) | {"wsl"}
 
 
+@app.middleware("http")
+async def _revalidate_assets(request, call_next):
+    """Make browsers revalidate index.html/app.js/css so a deploy is picked up
+    immediately, instead of running stale cached JS against fresh HTML."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 def _safe(fn, *args):
     try:
         return fn(*args)
