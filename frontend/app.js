@@ -92,16 +92,18 @@ function quoteRow(o) {
 
 let CARDS = SAMPLE.sports;   // current sports cards (for re-render)
 let DASH_URL = "";           // the full Stock Dashboard URL (from backend config)
+let ECON_URL = "";           // the Economic Calendar app URL (from backend config)
 let WINE_FETCHED_AT = 0;     // unix ts of the last live wine fetch
 
-function renderDashboardButton() {
-  const btn = document.getElementById("dashboard-link");
-  if (DASH_URL) {
-    btn.href = DASH_URL;
-    btn.style.display = "inline-flex";
-  } else {
-    btn.style.display = "none";
-  }
+function linkButton(id, url) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  if (url) { btn.href = url; btn.style.display = "inline-flex"; }
+  else { btn.style.display = "none"; }
+}
+function renderTopButtons() {
+  linkButton("dashboard-link", DASH_URL);
+  linkButton("calendar-link", ECON_URL);
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -503,12 +505,13 @@ async function boot() {
         news: j.news || SAMPLE.news,
       };
       DASH_URL = j.dashboardUrl || "";
+      ECON_URL = j.econCalendarUrl || "";
       live = !!(j.markets || j.sports || j.wine || j.news);
     }
   } catch (e) { /* backend not up — keep sample */ }
 
   render(data);
-  renderDashboardButton();
+  renderTopButtons();
   document.getElementById("data-status").textContent = live
     ? "Live data connected."
     : "Showing sample data — start the backend to go live. See README.";

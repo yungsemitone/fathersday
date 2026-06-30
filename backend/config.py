@@ -26,6 +26,10 @@ FEATURED_WATCHLIST = os.getenv("FEATURED_WATCHLIST", "")
 # the *frontend* URL, not STOCK_API_BASE (which is the backend API).
 STOCK_DASHBOARD_URL = os.getenv("STOCK_DASHBOARD_URL", "")
 
+# The Economic Calendar app — the Markets tab links to it next to the dashboard
+# button. Defaults to the deployed Fly app; override if it moves.
+ECON_CALENDAR_URL = os.getenv("ECON_CALENDAR_URL", "https://economic-calendar.fly.dev")
+
 # --- Wine: K&L auctions sit behind Cloudflare, so fetch them through an
 # unblocker service (scraperapi | scrapingbee | scrapfly | zenrows). Without a
 # key, the wine section uses the curated cellar.

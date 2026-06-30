@@ -14,6 +14,8 @@ primary_region = 'lax'
   STOCK_API_BASE = 'https://stockdashboard.fly.dev'
   # The full dashboard UI (Vercel frontend) the Markets button opens.
   STOCK_DASHBOARD_URL = 'https://stockdashboard-ochre.vercel.app'
+  # The Economic Calendar app the Markets tab also links to.
+  ECON_CALENDAR_URL = 'https://economic-calendar.fly.dev'
   # Persisted wine score cache lives here (the mounted volume below) so critic
   # scores survive deploys and aren't re-bought from Scrapfly each time.
   DATA_DIR = '/var/data'

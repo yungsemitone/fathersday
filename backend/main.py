@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from config import CORS_ORIGINS, STOCK_DASHBOARD_URL
+from config import CORS_ORIGINS, ECON_CALENDAR_URL, STOCK_DASHBOARD_URL
 from sources.markets import fetch_markets
 from sources.news import fetch_news
 from sources.sports import TEAMS, fetch_player_detail, fetch_sports, fetch_team_detail
@@ -62,6 +62,7 @@ def dashboard():
         "wineFetchedAt": wine_fetched_at(),
         "news": _safe(fetch_news),
         "dashboardUrl": STOCK_DASHBOARD_URL,
+        "econCalendarUrl": ECON_CALENDAR_URL,
     })
 
 
