@@ -130,6 +130,13 @@ function render(data) {
   // Backend already returns only qualifying deals (95+, FR/IT/ES/AU, below
   // market), best discount first. Hide any that ended since the last refresh.
   const wines = (data.wine || []).filter(w => !w.endDT || endsIn(w.endDT) !== "Ended");
+  // Curated fallback (shown when the live scraper can't refresh) has no end times.
+  const fallback = wines.length > 0 && wines.every(w => !w.endDT);
+  const fnote = document.getElementById("wine-fallback-note");
+  if (fnote) {
+    fnote.style.display = fallback ? "block" : "none";
+    fnote.textContent = fallback ? "↻ Live auction data is refreshing — these are reference picks (95+, below market), not current lots." : "";
+  }
   const body = document.getElementById("wine-body");
   if (!wines.length) {
     body.innerHTML = `<tr><td colspan="5" style="padding:28px 10px; text-align:center; color:var(--ink-3); font-style:italic;">No 95+ deals from France, Italy, Spain or Australia below market right now — the desk keeps watching.</td></tr>`;
