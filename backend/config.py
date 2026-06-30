@@ -36,8 +36,8 @@ KL_AUCTION_URL = os.getenv("KL_AUCTION_URL", "https://shop.klwines.com/products/
 # Critic scores + market price come from Wine-Searcher (via the unblocker), are
 # cached permanently per wine, and are budget-capped so the free Scrapfly tier
 # (1,000 credits/mo) is never overrun. Each lookup costs ~6 credits.
-WINE_SCORE_PER_REFRESH = int(os.getenv("WINE_SCORE_PER_REFRESH", "12"))
-WINE_SCORE_BUDGET_MONTH = int(os.getenv("WINE_SCORE_BUDGET_MONTH", "100"))
+WINE_SCORE_PER_REFRESH = int(os.getenv("WINE_SCORE_PER_REFRESH", "8"))
+WINE_SCORE_BUDGET_MONTH = int(os.getenv("WINE_SCORE_BUDGET_MONTH", "80"))
 
 # What qualifies as a wine "deal" to surface (Dad's rules):
 WINE_MIN_SCORE = int(os.getenv("WINE_MIN_SCORE", "95"))            # critic 95+
@@ -58,4 +58,4 @@ TTL_SPORTS = 600      # scores/rosters change slowly intraday
 TTL_SPORTS_DETAIL = 900
 TTL_WSL = 3600        # tour data is stable; swell refetched within
 TTL_SWELL = 3600      # marine forecast hourly is plenty
-TTL_WINE = 43200      # 12h: auctions move over days; keeps unblocker credit use low
+TTL_WINE = 86400      # 24h: once-a-day refresh keeps unblocker credit use low

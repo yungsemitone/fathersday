@@ -273,17 +273,42 @@ def _build_live() -> list[dict] | None:
 # Public entry — non-blocking. Serves the last live result instantly and
 # refreshes in the background (the live build can take minutes).
 # ---------------------------------------------------------------------------
-_RESULT: dict = {"data": None, "at": 0.0}
+_RESULT_PATH = os.path.join(DATA_DIR or os.path.join(_HERE, "..", "data"), "wine_result.json")
+_RESULT: dict = {"data": None, "at": 0.0, "tried": 0.0}
 _refresh_lock = threading.Lock()
+
+
+def _load_result() -> None:
+    """Restore the last good result at startup so restarts/deploys don't re-scrape."""
+    try:
+        with open(_RESULT_PATH, encoding="utf-8") as f:
+            saved = json.load(f)
+        if isinstance(saved.get("data"), list):
+            _RESULT["data"], _RESULT["at"] = saved["data"], float(saved.get("at", 0))
+    except (FileNotFoundError, ValueError, OSError):
+        pass
+
+
+def _save_result() -> None:
+    try:
+        os.makedirs(os.path.dirname(_RESULT_PATH), exist_ok=True)
+        tmp = _RESULT_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"data": _RESULT["data"], "at": _RESULT["at"]}, f)
+        os.replace(tmp, _RESULT_PATH)
+    except OSError as e:
+        print("[wine] could not persist result:", e)
 
 
 def _refresh() -> None:
     if not _refresh_lock.acquire(blocking=False):
         return                              # a refresh is already running
     try:
+        _RESULT["tried"] = time.time()       # mark the attempt (success or not)
         data = _build_live()
         if data is not None:                 # [] (no deals) is a valid result
             _RESULT["data"], _RESULT["at"] = data, time.time()
+            _save_result()
     except Exception as e:                   # noqa: BLE001
         print("[wine] refresh failed:", e)
     finally:
@@ -291,15 +316,21 @@ def _refresh() -> None:
 
 
 def warm() -> None:
-    """Kick a background refresh (called once at app startup)."""
-    threading.Thread(target=_refresh, daemon=True).start()
+    """Refresh in the background only if our last good result is stale. Survives
+    restarts via the persisted file, so deploys don't burn credits re-scraping.
+    The 'tried' timestamp throttles retries when the scraper is down."""
+    last = max(_RESULT["at"], _RESULT["tried"])
+    if time.time() - last > TTL_WINE and not _refresh_lock.locked():
+        threading.Thread(target=_refresh, daemon=True).start()
 
 
 def fetch_wine():
-    if time.time() - _RESULT["at"] > TTL_WINE and not _refresh_lock.locked():
-        warm()
-    # Once warmed, serve the live deals (even an empty list -> "no deals" state).
-    # Before the first successful warm, show the curated cellar.
-    if _RESULT["data"] is not None:
-        return _RESULT["data"]
-    return _load_cellar()
+    warm()
+    data = _RESULT["data"]
+    fresh = (time.time() - _RESULT["at"]) < TTL_WINE * 2
+    if data is not None and fresh:
+        return [d for d in data if _active(d)]   # live deals, minus any that ended
+    return _load_cellar()                          # scraper down / cold -> curated
+
+
+_load_result()  # at import, restore the last good result from the volume
