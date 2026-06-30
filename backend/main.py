@@ -22,7 +22,12 @@ from config import CORS_ORIGINS, STOCK_DASHBOARD_URL
 from sources.markets import fetch_markets
 from sources.news import fetch_news
 from sources.sports import TEAMS, fetch_player_detail, fetch_sports, fetch_team_detail
-from sources.wine import fetch_wine, warm as warm_wine
+from sources.wine import (
+    fetch_wine,
+    fetched_at as wine_fetched_at,
+    force_refresh as force_refresh_wine,
+    warm as warm_wine,
+)
 from sources.wsl import fetch_wsl
 
 app = FastAPI(title="The Morning Desk")
@@ -31,7 +36,7 @@ _origins = ["*"] if CORS_ORIGINS.strip() == "*" else [o.strip() for o in CORS_OR
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -54,6 +59,7 @@ def dashboard():
         "markets": _safe(fetch_markets),
         "sports": _safe(fetch_sports),
         "wine": _safe(fetch_wine),
+        "wineFetchedAt": wine_fetched_at(),
         "news": _safe(fetch_news),
         "dashboardUrl": STOCK_DASHBOARD_URL,
     })
@@ -101,7 +107,14 @@ def wsl():
 
 @app.get("/api/wine")
 def wine():
-    return JSONResponse({"wine": _safe(fetch_wine)})
+    return JSONResponse({"wine": _safe(fetch_wine), "fetchedAt": wine_fetched_at()})
+
+
+@app.post("/api/wine/refresh")
+def wine_refresh():
+    """Manual refresh button — kick an immediate background re-scrape."""
+    force_refresh_wine()
+    return JSONResponse({"status": "refreshing", "fetchedAt": wine_fetched_at()})
 
 
 @app.on_event("startup")

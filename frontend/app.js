@@ -42,12 +42,7 @@ const SAMPLE = {
     { key: "usc", league: "NCAA", team: "USC Trojans", color: "#990000", abbr: "USC", line: "Football · preseason", detail: "Season opens late August", res: "" },
     { key: "wsl", league: "WSL", team: "World Surf League", color: "#0AA1C4", abbr: "WSL", line: "Leaders: Colapinto · Picklum", detail: "Next: Corona Open J-Bay · Jul 9", res: "" },
   ],
-  wine: [
-    { name: "Château Léoville Las Cases 2016", region: "St-Julien · 750ml", bid: 205, mkt: 295, left: "1d 4h", score: 98, critic: "RP" },
-    { name: "Château Montrose 2016", region: "St-Estèphe · 750ml", bid: 168, mkt: 240, left: "6h 12m", score: 99, critic: "JS" },
-    { name: "Ridge Monte Bello 2018", region: "Santa Cruz Mtns · 750ml", bid: 172, mkt: 235, left: "5h 41m", score: 97, critic: "WS" },
-    { name: "Dominus Estate 2018", region: "Napa · 750ml", bid: 268, mkt: 365, left: "9h 20m", score: 99, critic: "RP" },
-  ],
+  wine: [],   // no curated stand-in — wine is live-only (or an honest empty state)
   news: [
     { src: "Reuters", h: "Fed holds rates, signals patience on cuts", s: "The committee kept its benchmark steady, citing still-elevated services inflation and a labor market that has cooled only gradually.", url: "#" },
     { src: "Bloomberg", h: "Semiconductor shares slip on demand worries", s: "A pullback led by the chip complex weighed on the Nasdaq, with traders trimming exposure into quarter-end.", url: "#" },
@@ -97,6 +92,7 @@ function quoteRow(o) {
 
 let CARDS = SAMPLE.sports;   // current sports cards (for re-render)
 let DASH_URL = "";           // the full Stock Dashboard URL (from backend config)
+let WINE_FETCHED_AT = 0;     // unix ts of the last live wine fetch
 
 function renderDashboardButton() {
   const btn = document.getElementById("dashboard-link");
@@ -106,6 +102,78 @@ function renderDashboardButton() {
   } else {
     btn.style.display = "none";
   }
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function agoText(ts) {
+  if (!ts) return "";
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+}
+function updateWineStamp() {
+  const el = document.getElementById("wine-updated");
+  if (el) el.textContent = WINE_FETCHED_AT ? "updated " + agoText(WINE_FETCHED_AT) : "";
+}
+
+/* Wine table: null = not fetched yet (checking), [] = nothing at a discount,
+   [..] = real deals. No curated stand-in. */
+function renderWine(wine) {
+  updateWineStamp();
+  const body = document.getElementById("wine-body");
+  if (wine == null) {
+    body.innerHTML = `<tr><td colspan="5" class="wine-msg">Checking K&amp;L auctions…</td></tr>`;
+    return;
+  }
+  const wines = wine.filter(w => !w.endDT || endsIn(w.endDT) !== "Ended");
+  if (!wines.length) {
+    body.innerHTML = `<tr><td colspan="5" class="wine-msg">No 95+ wine from France, Italy, Spain or Australia is bidding below market right now. Hit refresh to check again.</td></tr>`;
+    return;
+  }
+  body.innerHTML = wines.map(w => {
+    const href = w.url || ("https://www.klwines.com/Products?searchText=" + encodeURIComponent(w.name));
+    const chip = w.score ? `<span class="score-chip">${esc(w.score)} ${esc(w.critic || "WS")}</span>` : "";
+    const count = w.count || 1;
+    const cnt = (count > 1) ? ` <span style="color:var(--ink-3)">×${count}</span>` : "";
+    const ends = w.endDT ? endsIn(w.endDT) : (w.left || "—");
+    const mktLot = w.mkt ? Math.round(w.mkt * count) : null;   // lot value = per-btl × bottles
+    const mktCell = mktLot
+      ? `$${mktLot}${count > 1 ? `<div class="wine-sub">$${w.mkt}/btl</div>` : ""}`
+      : "—";
+    return `
+      <tr>
+        <td><a class="wine-name" href="${esc(href)}" target="_blank" rel="noopener">${esc(w.name)}</a>${chip}<div class="wine-sub">${esc(w.region)}</div></td>
+        <td class="mono">$${w.bid}${cnt}</td>
+        <td class="mono" style="color:var(--ink-3)">${mktCell}</td>
+        <td class="mono" style="color:var(--ink-3)">${esc(ends)}</td>
+        <td>${w.disc != null ? `<span class="disc">−${w.disc}%</span>` : '<span style="color:var(--ink-3)">—</span>'}</td>
+      </tr>`;
+  }).join("");
+}
+
+/* Manual refresh button: kick a re-scrape, then poll until fresh data lands. */
+async function refreshWine() {
+  const btn = document.getElementById("wine-refresh");
+  const startAt = WINE_FETCHED_AT;
+  if (btn) { btn.disabled = true; btn.textContent = "↻ Refreshing…"; }
+  try { await fetch(API_BASE + "/api/wine/refresh", { method: "POST" }); } catch (e) { /* ignore */ }
+  const deadline = Date.now() + 110000;     // give the scrape up to ~110s
+  let got = false;
+  while (Date.now() < deadline) {
+    await sleep(4000);
+    try {
+      const j = await (await fetch(API_BASE + "/api/wine", { cache: "no-store" })).json();
+      if ((j.fetchedAt || 0) > startAt) { WINE_FETCHED_AT = j.fetchedAt; renderWine(j.wine); got = true; break; }
+    } catch (e) { /* keep polling */ }
+  }
+  if (!got && !WINE_FETCHED_AT) {
+    const body = document.getElementById("wine-body");
+    if (body) body.innerHTML = `<tr><td colspan="5" class="wine-msg">Couldn't reach K&amp;L just now — try Refresh again in a moment.</td></tr>`;
+  }
+  if (btn) { btn.disabled = false; btn.textContent = "↻ Refresh"; }
+  updateWineStamp();
 }
 
 /* ---------------------------------------------------------------------
@@ -127,41 +195,8 @@ function render(data) {
   CARDS = data.sports;
   renderSportsGrid(data.sports);
 
-  // Backend already returns only qualifying deals (95+, FR/IT/ES/AU, below
-  // market), best discount first. Hide any that ended since the last refresh.
-  const wines = (data.wine || []).filter(w => !w.endDT || endsIn(w.endDT) !== "Ended");
-  // Curated fallback (shown when the live scraper can't refresh) has no end times.
-  const fallback = wines.length > 0 && wines.every(w => !w.endDT);
-  const fnote = document.getElementById("wine-fallback-note");
-  if (fnote) {
-    fnote.style.display = fallback ? "block" : "none";
-    fnote.textContent = fallback ? "↻ Live auction data is refreshing — these are reference picks (95+, below market), not current lots." : "";
-  }
-  const body = document.getElementById("wine-body");
-  if (!wines.length) {
-    body.innerHTML = `<tr><td colspan="5" style="padding:28px 10px; text-align:center; color:var(--ink-3); font-style:italic;">No 95+ deals from France, Italy, Spain or Australia below market right now — the desk keeps watching.</td></tr>`;
-  } else {
-    body.innerHTML = wines.map(w => {
-      const href = w.url || ("https://www.klwines.com/Products?searchText=" + encodeURIComponent(w.name));
-      const chip = w.score ? `<span class="score-chip">${esc(w.score)} ${esc(w.critic || "WS")}</span>` : "";
-      const count = w.count || 1;
-      const cnt = (count > 1) ? ` <span style="color:var(--ink-3)">×${count}</span>` : "";
-      const ends = w.endDT ? endsIn(w.endDT) : (w.left || "—");
-      // Compare like-for-like: the lot's market value = per-bottle market × bottles.
-      const mktLot = w.mkt ? Math.round(w.mkt * count) : null;
-      const mktCell = mktLot
-        ? `$${mktLot}${count > 1 ? `<div class="wine-sub">$${w.mkt}/btl</div>` : ""}`
-        : "—";
-      return `
-        <tr>
-          <td><a class="wine-name" href="${esc(href)}" target="_blank" rel="noopener">${esc(w.name)}</a>${chip}<div class="wine-sub">${esc(w.region)}</div></td>
-          <td class="mono">$${w.bid}${cnt}</td>
-          <td class="mono" style="color:var(--ink-3)">${mktCell}</td>
-          <td class="mono" style="color:var(--ink-3)">${esc(ends)}</td>
-          <td>${w.disc != null ? `<span class="disc">−${w.disc}%</span>` : '<span style="color:var(--ink-3)">—</span>'}</td>
-        </tr>`;
-    }).join("");
-  }
+  WINE_FETCHED_AT = data.wineFetchedAt || 0;
+  renderWine(data.wine);
 
   document.getElementById("news-body").innerHTML = data.news.map(n => {
     const href = n.url && n.url !== "#" ? esc(n.url) : null;
@@ -463,7 +498,8 @@ async function boot() {
           macro: mk.macro || SAMPLE.markets.macro,
         },
         sports: j.sports || SAMPLE.sports,
-        wine: Array.isArray(j.wine) ? j.wine : SAMPLE.wine,  // [] = "no deals", keep it
+        wine: ("wine" in j) ? j.wine : SAMPLE.wine,  // pass through null/[]: no curated stand-in
+        wineFetchedAt: j.wineFetchedAt || 0,
         news: j.news || SAMPLE.news,
       };
       DASH_URL = j.dashboardUrl || "";
@@ -476,6 +512,9 @@ async function boot() {
   document.getElementById("data-status").textContent = live
     ? "Live data connected."
     : "Showing sample data — start the backend to go live. See README.";
+
+  // Cold start: the live wine fetch warms in the background — poll it in.
+  if (data.wine == null) refreshWine();
 }
 
 /* ---- clock + greeting ---- */
@@ -488,6 +527,7 @@ function refreshTime() {
   const timeStr = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   document.getElementById("asof").textContent = "as of " + timeStr;
   document.getElementById("hero-stamp").textContent = dateStr + " · " + timeStr + " PT";
+  updateWineStamp();   // keep the "updated Xm ago" label ticking
 }
 
 /* ---- tabs ---- */
@@ -500,6 +540,8 @@ function show(id) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 tabs.forEach(t => t.addEventListener("click", () => show(t.dataset.tab)));
+const wineRefreshBtn = document.getElementById("wine-refresh");
+if (wineRefreshBtn) wineRefreshBtn.addEventListener("click", refreshWine);
 document.querySelectorAll("[data-jump]").forEach(c => {
   const go = () => show(c.dataset.jump);
   c.addEventListener("click", go);

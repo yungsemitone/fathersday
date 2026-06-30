@@ -5,23 +5,22 @@ the good ones (90+) surfaced as deals vs. their market price.
 
 How it works now:
   1. Read the live K&L auctions page (shop.klwines.com) through the Cloudflare
-     unblocker (Scrapfly). It's a Next.js app, so every lot is in a clean
-     embedded JSON feed: name, vintage, current bid, # bids, end time, link.
+     unblocker (Bright Data Web Unlocker by default). It's a Next.js app, so
+     every lot is in a clean embedded JSON feed.
   2. For each lot, look up the wine on Wine-Searcher (also via the unblocker) to
      get its aggregated **critic score** and **average market price**. These
      never change, so they're cached *permanently* — each wine is only ever paid
-     for once — and the whole thing is capped to a monthly credit budget so the
-     free Scrapfly tier is never overrun.
+     for once — and lookups are capped to a monthly budget to bound cost.
   3. We surface only genuine *deals*: wines from Dad's regions (France, Italy,
      Spain, Australia) scored 95+ whose per-bottle bid is below Wine-Searcher's
      market price, still live (not ended), sorted by discount.
 
 Filtering to those countries happens BEFORE scoring, so credits are only spent
-on relevant lots. No SCRAPER_API_KEY (or K&L unreachable) -> curated cellar.
+on relevant lots. There is no curated stand-in: if there are no qualifying deals
+the section says so, and if the unblocker is down it shows the last good result.
 """
 from __future__ import annotations
 
-import csv
 import json
 import os
 import re
@@ -43,7 +42,6 @@ from config import (
 from scraper import fetch_unblocked
 
 _HERE = os.path.dirname(__file__)
-CELLAR_CSV = os.path.join(_HERE, "..", "data", "wine_cellar.csv")
 SCORES_PATH = os.path.join(DATA_DIR or os.path.join(_HERE, "..", "data"), "wine_scores.json")
 
 MIN_DISCOUNT = WINE_MIN_DISCOUNT   # ≥X% below market to count as a deal
@@ -56,42 +54,6 @@ _lock = threading.Lock()
 
 def _country_ok(country: str) -> bool:
     return (country or "").strip().lower() in COUNTRIES
-
-
-# ---------------------------------------------------------------------------
-# Curated fallback (used when there's no scraper key / K&L is unreachable)
-# ---------------------------------------------------------------------------
-def _kl_search_url(name: str) -> str:
-    return f"https://www.klwines.com/Products?searchText={quote_plus(name)}"
-
-
-def _load_cellar() -> list[dict]:
-    out = []
-    try:
-        with open(CELLAR_CSV, newline="", encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                try:
-                    bid, mkt, score = float(r["bid"]), float(r["market_avg"]), int(r["score"])
-                    if score < MIN_SCORE or bid >= mkt * (1 - MIN_DISCOUNT):
-                        continue
-                    if not _country_ok(r.get("country", "")):
-                        continue
-                    name = f"{r['name'].strip()} {r['vintage'].strip()}".strip()
-                    out.append({
-                        "name": name,
-                        "region": f"{r['region'].strip()} · 750ml",
-                        "bid": round(bid), "mkt": round(mkt),
-                        "endDT": None, "left": r.get("time_left", "").strip() or "—",
-                        "nbids": None, "score": score, "critic": r.get("critic", "").strip(),
-                        "disc": round((1 - bid / mkt) * 100),
-                        "url": _kl_search_url(name),
-                    })
-                except (KeyError, ValueError):
-                    continue
-    except FileNotFoundError:
-        pass
-    out.sort(key=lambda w: w["disc"], reverse=True)
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -324,13 +286,28 @@ def warm() -> None:
         threading.Thread(target=_refresh, daemon=True).start()
 
 
+def force_refresh() -> None:
+    """Kick an immediate refresh regardless of staleness (the manual button)."""
+    if not _refresh_lock.locked():
+        threading.Thread(target=_refresh, daemon=True).start()
+
+
+def fetch_deals():
+    """Current qualifying deals, minus any lot that has since ended.
+    None means 'not fetched yet' (cold); [] means 'checked, nothing at a discount'."""
+    data = _RESULT["data"]
+    if data is None:
+        return None
+    return [d for d in data if _active(d)]
+
+
+def fetched_at() -> float:
+    return _RESULT["at"]
+
+
 def fetch_wine():
     warm()
-    data = _RESULT["data"]
-    fresh = (time.time() - _RESULT["at"]) < TTL_WINE * 2
-    if data is not None and fresh:
-        return [d for d in data if _active(d)]   # live deals, minus any that ended
-    return _load_cellar()                          # scraper down / cold -> curated
+    return fetch_deals()   # no curated stand-in: real deals, [] (none), or None (cold)
 
 
 _load_result()  # at import, restore the last good result from the volume

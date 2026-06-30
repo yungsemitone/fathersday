@@ -29,15 +29,19 @@ STOCK_DASHBOARD_URL = os.getenv("STOCK_DASHBOARD_URL", "")
 # --- Wine: K&L auctions sit behind Cloudflare, so fetch them through an
 # unblocker service (scraperapi | scrapingbee | scrapfly | zenrows). Without a
 # key, the wine section uses the curated cellar.
-SCRAPER_PROVIDER = os.getenv("SCRAPER_PROVIDER", "scrapfly")
+SCRAPER_PROVIDER = os.getenv("SCRAPER_PROVIDER", "brightdata")
 SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "")
+# Bright Data Web Unlocker (pay-as-you-go ~$1.5/1k requests): set the API token
+# and the Web Unlocker zone name. Used when SCRAPER_PROVIDER=brightdata.
+BRIGHTDATA_API_TOKEN = os.getenv("BRIGHTDATA_API_TOKEN", "")
+BRIGHTDATA_ZONE = os.getenv("BRIGHTDATA_ZONE", "")
 KL_AUCTION_URL = os.getenv("KL_AUCTION_URL", "https://shop.klwines.com/products/auctions")
 
 # Critic scores + market price come from Wine-Searcher (via the unblocker), are
 # cached permanently per wine, and are budget-capped so the free Scrapfly tier
 # (1,000 credits/mo) is never overrun. Each lookup costs ~6 credits.
-WINE_SCORE_PER_REFRESH = int(os.getenv("WINE_SCORE_PER_REFRESH", "8"))
-WINE_SCORE_BUDGET_MONTH = int(os.getenv("WINE_SCORE_BUDGET_MONTH", "80"))
+WINE_SCORE_PER_REFRESH = int(os.getenv("WINE_SCORE_PER_REFRESH", "10"))
+WINE_SCORE_BUDGET_MONTH = int(os.getenv("WINE_SCORE_BUDGET_MONTH", "250"))
 
 # What qualifies as a wine "deal" to surface (Dad's rules):
 WINE_MIN_SCORE = int(os.getenv("WINE_MIN_SCORE", "95"))            # critic 95+
@@ -58,4 +62,4 @@ TTL_SPORTS = 600      # scores/rosters change slowly intraday
 TTL_SPORTS_DETAIL = 900
 TTL_WSL = 3600        # tour data is stable; swell refetched within
 TTL_SWELL = 3600      # marine forecast hourly is plenty
-TTL_WINE = 86400      # 24h: once-a-day refresh keeps unblocker credit use low
+TTL_WINE = 10800      # 3h: frequent enough that Dad won't miss auctions, still cheap

@@ -17,8 +17,9 @@ primary_region = 'lax'
   # Persisted wine score cache lives here (the mounted volume below) so critic
   # scores survive deploys and aren't re-bought from Scrapfly each time.
   DATA_DIR = '/var/data'
-  SCRAPER_PROVIDER = 'scrapfly'
-  # SCRAPER_API_KEY is set as a secret, NOT here:  fly secrets set SCRAPER_API_KEY=...
+  SCRAPER_PROVIDER = 'brightdata'
+  # Bright Data Web Unlocker creds are set as secrets, NOT here:
+  #   fly secrets set BRIGHTDATA_API_TOKEN=... BRIGHTDATA_ZONE=...
 
 [mounts]
   source = 'data'

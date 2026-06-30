@@ -1,13 +1,17 @@
 """Fetch a URL through a Cloudflare-solving "unblocker" service.
 
-K&L's auction pages (shop.klwines.com) sit behind a Cloudflare JS challenge, so
-an always-on server can't read them directly. These services route the request
-through a real browser on a residential IP that passes the challenge, and hand
-back the rendered HTML. Set SCRAPER_PROVIDER + SCRAPER_API_KEY; without a key
-this returns None and the wine section falls back to the curated cellar.
+K&L's auction pages (shop.klwines.com) and Wine-Searcher sit behind a Cloudflare
+JS challenge, so an always-on server can't read them directly. These services
+route the request through a real browser on a residential IP that passes the
+challenge, and hand back the rendered HTML.
 
-Be a good citizen: this is for one person's morning dashboard — keep the cache
-long (a few hits a day), not a scraper farm.
+Default provider is Bright Data Web Unlocker (pay-as-you-go, ~$1.5/1k requests):
+set SCRAPER_PROVIDER=brightdata + BRIGHTDATA_API_TOKEN + BRIGHTDATA_ZONE. The
+credit-based providers (scrapfly/scraperapi/...) are still supported via
+SCRAPER_API_KEY. Without credentials this returns None.
+
+Be a good citizen: this is for one person's morning dashboard — keep the refresh
+interval modest, not a scraper farm.
 """
 from __future__ import annotations
 
@@ -15,10 +19,22 @@ import time
 
 import httpx
 
-from config import SCRAPER_API_KEY, SCRAPER_PROVIDER
+from config import (
+    BRIGHTDATA_API_TOKEN,
+    BRIGHTDATA_ZONE,
+    SCRAPER_API_KEY,
+    SCRAPER_PROVIDER,
+)
 
-# Each provider: (endpoint, param-builder). All enable JS rendering + the
-# anti-bot/residential mode needed to clear Cloudflare's challenge.
+
+def _configured() -> bool:
+    if SCRAPER_PROVIDER.lower() == "brightdata":
+        return bool(BRIGHTDATA_API_TOKEN and BRIGHTDATA_ZONE)
+    return bool(SCRAPER_API_KEY)
+
+
+# Credit-based providers use a simple GET API with these params (JS render +
+# the anti-bot/residential mode needed to clear Cloudflare).
 def _request(url: str):
     key, p = SCRAPER_API_KEY, SCRAPER_PROVIDER.lower()
     if p == "scraperapi":
@@ -40,14 +56,38 @@ def _request(url: str):
     return None, None
 
 
-def fetch_unblocked(url: str, timeout: float = 130.0, attempts: int = 2) -> str | None:
-    """Return the page's rendered HTML/text, or None if unavailable.
+def _fetch_brightdata(url: str, timeout: float, attempts: int) -> str | None:
+    """Bright Data Web Unlocker API — a POST that returns the raw unblocked HTML."""
+    last = None
+    for i in range(attempts):
+        try:
+            r = httpx.post(
+                "https://api.brightdata.com/request",
+                headers={"Authorization": f"Bearer {BRIGHTDATA_API_TOKEN}"},
+                json={"zone": BRIGHTDATA_ZONE, "url": url, "format": "raw"},
+                timeout=timeout,
+            )
+            r.raise_for_status()
+            return r.text
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if i + 1 < attempts:
+                time.sleep(3 * (i + 1))
+    print(f"[scraper] brightdata failed for {url} after {attempts} tries: {last}")
+    return None
 
-    Retries transient failures (timeouts, 422/429/5xx) — the unblocker is
-    occasionally flaky on heavy pages, and providers don't charge for errors.
+
+def fetch_unblocked(url: str, timeout: float = 130.0, attempts: int = 2) -> str | None:
+    """Return the page's unblocked HTML/text, or None if unavailable.
+
+    Retries transient failures — the unblockers are occasionally flaky on heavy
+    pages, and don't charge for errors.
     """
-    if not SCRAPER_API_KEY:
+    if not _configured():
         return None
+    if SCRAPER_PROVIDER.lower() == "brightdata":
+        return _fetch_brightdata(url, timeout, attempts)
+
     base, params = _request(url)
     if not base:
         print(f"[scraper] unknown SCRAPER_PROVIDER '{SCRAPER_PROVIDER}'")
@@ -57,11 +97,10 @@ def fetch_unblocked(url: str, timeout: float = 130.0, attempts: int = 2) -> str 
         try:
             r = httpx.get(base, params=params, timeout=timeout)
             r.raise_for_status()
-            # Scrapfly wraps the page in JSON: {"result": {"content": "..."}}
-            if SCRAPER_PROVIDER.lower() == "scrapfly":
+            if SCRAPER_PROVIDER.lower() == "scrapfly":   # Scrapfly wraps in JSON
                 return (r.json().get("result") or {}).get("content")
             return r.text
-        except Exception as e:  # noqa: BLE001 - fail soft to curated cellar
+        except Exception as e:  # noqa: BLE001
             last = e
             if i + 1 < attempts:
                 time.sleep(3 * (i + 1))
