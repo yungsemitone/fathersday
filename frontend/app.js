@@ -551,6 +551,30 @@ document.querySelectorAll("[data-jump]").forEach(c => {
   c.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
 });
 
+/* ---- settings + theme ---- */
+const THEME_KEY = "md-theme";
+function applyTheme(t) {
+  const light = t === "light";
+  document.documentElement.classList.toggle("theme-light", light);
+  try { localStorage.setItem(THEME_KEY, light ? "light" : "dark"); } catch (e) { /* private mode */ }
+  document.querySelectorAll("#theme-seg .seg-btn").forEach(b =>
+    b.setAttribute("aria-selected", String(b.dataset.themeVal === (light ? "light" : "dark"))));
+}
+(function initSettings() {
+  const overlay = document.getElementById("settings-overlay");
+  const gear = document.getElementById("settings-gear");
+  const closeBtn = document.getElementById("settings-close");
+  const close = () => { if (overlay) overlay.hidden = true; };
+  if (gear) gear.addEventListener("click", () => { if (overlay) overlay.hidden = false; });
+  if (closeBtn) closeBtn.addEventListener("click", close);
+  if (overlay) overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
+  document.querySelectorAll("#theme-seg .seg-btn").forEach(b =>
+    b.addEventListener("click", () => applyTheme(b.dataset.themeVal)));
+  // sync the toggle to whatever the no-flash head script already applied
+  applyTheme(document.documentElement.classList.contains("theme-light") ? "light" : "dark");
+})();
+
 refreshTime();
 setInterval(refreshTime, 30000);
 boot();

@@ -15,6 +15,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>The Morning Desk</title>
+<script>try{if(localStorage.getItem("md-theme")==="light")document.documentElement.classList.add("theme-light");}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Libre+Franklin:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -95,7 +96,7 @@
     border-radius: var(--r); overflow: hidden; position: relative;
     border: 1px solid var(--line);
     background:
-      linear-gradient(180deg, rgba(26,21,19,0) 38%, var(--card) 100%),
+      linear-gradient(180deg, rgba(26,21,19,0) 38%, #231a15 100%),
       linear-gradient(105deg, #2A1216 0%, #5A2230 26%, #9C5530 52%, #C99352 74%, #6E7E86 100%);
     padding: 34px 30px 26px; animation: rise .5s ease both;
   }
@@ -264,13 +265,85 @@
   /* markets -> stock dashboard button */
   .dash-btn { display:inline-flex; align-items:center; gap:8px; margin:2px 0 20px; padding:10px 16px; border:1px solid var(--claret); border-radius:999px; background:rgba(166,57,74,.12); color:var(--ink); font-family:"Libre Franklin",sans-serif; font-size:13px; font-weight:600; text-decoration:none; transition:background .18s ease, border-color .18s ease; }
   .dash-btn:hover { background:rgba(194,83,97,.2); border-color:var(--claret-2); }
+  /* ===== smooth theme switching ===== */
+  body, .card, .stat, .player, .swell-day, .settings-panel, .segmented { transition: background-color .25s ease, border-color .25s ease, color .25s ease; }
+
+  /* ===== LIGHT THEME (warm white) ===== */
+  :root.theme-light {
+    --bg:        #FAF8F4;
+    --bg-2:      #F1ECE4;
+    --card:      #FFFFFF;
+    --card-2:    #F6F2EB;
+    --line:      #E4DDD1;
+    --line-soft: #EDE7DD;
+    --ink:       #29211B;
+    --ink-2:     #574C43;
+    --ink-3:     #6F655B;
+    --claret:    #A6394A;
+    --claret-2:  #A6394A;
+    --gold:      #967322;
+    --up:        #2E7D46;
+    --down:      #C0392B;
+  }
+  /* gold-tinted bits use hardcoded rgba — darken them so they read on white */
+  :root.theme-light .score-chip { border-color: rgba(150,115,34,.45); background: rgba(150,115,34,.10); }
+  :root.theme-light .chip.flag  { border-color: rgba(150,115,34,.45); background: rgba(150,115,34,.09); }
+  :root.theme-light .sched-divider::before,
+  :root.theme-light .sched-divider::after { background: rgba(150,115,34,.30); }
+  :root.theme-light .sched-row.is-next { background: rgba(150,115,34,.07); }
+  :root.theme-light .dash-btn { background: rgba(166,57,74,.08); }
+  :root.theme-light .dash-btn:hover { background: rgba(166,57,74,.15); }
+  :root.theme-light .settings-panel { box-shadow: 0 16px 44px rgba(40,25,15,.16); }
+  :root.theme-light .settings-overlay { background: rgba(30,22,14,.14); }
+
+  /* ===== settings gear + panel ===== */
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .gear { appearance: none; background: none; border: 0; cursor: pointer; color: var(--ink-3); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; transition: color .15s ease, background .15s ease; }
+  .gear:hover { color: var(--ink); background: var(--card-2); }
+  .gear svg { display: block; }
+  .settings-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.30); display: flex; justify-content: flex-end; align-items: flex-start; padding: 58px 22px; animation: fade .15s ease; }
+  .settings-overlay[hidden] { display: none; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  .settings-panel { width: 280px; max-width: calc(100vw - 44px); background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px rgba(0,0,0,.5); padding: 16px 16px 18px; animation: rise .2s ease both; }
+  .settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .settings-head span { font-family: "Fraunces", serif; font-weight: 600; font-size: 18px; }
+  .settings-close { appearance: none; background: none; border: 0; cursor: pointer; color: var(--ink-3); font-size: 15px; line-height: 1; padding: 4px 7px; border-radius: 6px; }
+  .settings-close:hover { color: var(--ink); background: var(--card-2); }
+  .settings-section { margin-bottom: 16px; }
+  .settings-section:last-child { margin-bottom: 0; }
+  .settings-label { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 9px; }
+  .segmented { display: flex; gap: 3px; background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: 10px; padding: 3px; }
+  .seg-btn { flex: 1; appearance: none; background: none; border: 0; cursor: pointer; border-radius: 7px; padding: 8px 10px; font-family: "Libre Franklin", sans-serif; font-size: 13px; font-weight: 600; color: var(--ink-3); transition: background .15s ease, color .15s ease; }
+  .seg-btn:hover { color: var(--ink-2); }
+  .seg-btn[aria-selected="true"] { background: var(--claret); color: #fff; }
 </style>
 
 <div class="wrap">
   <header class="topbar">
     <div class="mark">The Morning Desk<span class="dot">.</span></div>
-    <div class="asof" id="asof">—</div>
+    <div class="topbar-right">
+      <div class="asof" id="asof">—</div>
+      <button class="gear" id="settings-gear" aria-label="Settings" title="Settings">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
   </header>
+
+  <div class="settings-overlay" id="settings-overlay" hidden>
+    <div class="settings-panel" role="dialog" aria-label="Settings" aria-modal="true">
+      <div class="settings-head">
+        <span>Settings</span>
+        <button class="settings-close" id="settings-close" aria-label="Close settings">✕</button>
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">Appearance</div>
+        <div class="segmented" id="theme-seg" role="tablist" aria-label="Theme">
+          <button class="seg-btn" role="tab" data-theme-val="dark">Dark</button>
+          <button class="seg-btn" role="tab" data-theme-val="light">Light</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
     <button class="tab" role="tab" data-tab="home"    aria-selected="true">Home</button>
@@ -375,4 +448,4 @@
   </div>
 </div>
 
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
