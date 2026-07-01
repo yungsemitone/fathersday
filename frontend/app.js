@@ -94,6 +94,10 @@ let CARDS = SAMPLE.sports;   // current sports cards (for re-render)
 let DASH_URL = "";           // the full Stock Dashboard URL (from backend config)
 let ECON_URL = "";           // the Economic Calendar app URL (from backend config)
 let WINE_FETCHED_AT = 0;     // unix ts of the last live wine fetch
+let MARKETS_DATA = null;     // last markets payload (for the watchlist picker)
+let refreshTimer = null;     // auto-refresh interval handle
+const WL_KEY = "md-featured-list";
+const REFRESH_KEY = "md-refresh";
 
 function linkButton(id, url) {
   const btn = document.getElementById(id);
@@ -104,6 +108,44 @@ function linkButton(id, url) {
 function renderTopButtons() {
   linkButton("dashboard-link", DASH_URL);
   linkButton("calendar-link", ECON_URL);
+}
+
+/* Render the featured watchlist (settings-selectable) + populate its picker.
+   Returns the chosen list {name, rows}. */
+function renderWatchlist() {
+  const m = MARKETS_DATA;
+  if (!m) return null;
+  const lists = (m.lists && m.lists.length) ? m.lists
+    : (m.watchlist ? [{ name: m.listName || "Watchlist", rows: m.watchlist }] : []);
+  if (!lists.length) return null;
+  let saved = null; try { saved = localStorage.getItem(WL_KEY); } catch (e) { /* private */ }
+  const chosen = lists.find(l => l.name === saved) || lists.find(l => l.name === m.listName) || lists[0];
+
+  document.getElementById("watchlist").innerHTML = chosen.rows.map(quoteRow).join("");
+  document.getElementById("watchlist-label").textContent = chosen.name ? `Watchlist · ${chosen.name}` : "Watchlist";
+
+  const section = document.getElementById("watchlist-setting");
+  const opts = document.getElementById("watchlist-opts");
+  if (section && opts) {
+    section.hidden = lists.length < 2;   // a picker is pointless with one list
+    opts.innerHTML = lists.map(l =>
+      `<button class="opt-btn" data-list="${esc(l.name)}" aria-selected="${l.name === chosen.name}">${esc(l.name || "Watchlist")}</button>`).join("");
+    opts.querySelectorAll("[data-list]").forEach(b => b.addEventListener("click", () => {
+      try { localStorage.setItem(WL_KEY, b.dataset.list); } catch (e) { /* private */ }
+      renderWatchlist();
+    }));
+  }
+  return chosen;
+}
+
+/* Auto-refresh: re-fetch the dashboard on an interval (off / 5 min / 1 min). */
+function applyRefresh(v) {
+  try { localStorage.setItem(REFRESH_KEY, v); } catch (e) { /* private */ }
+  document.querySelectorAll("#refresh-seg .seg-btn").forEach(b =>
+    b.setAttribute("aria-selected", String(b.dataset.refreshVal === v)));
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  const ms = v === "live" ? 60000 : v === "normal" ? 300000 : 0;
+  if (ms) refreshTimer = setInterval(reloadDashboard, ms);
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -183,9 +225,9 @@ async function refreshWine() {
    --------------------------------------------------------------------- */
 function render(data) {
   const m = data.markets;
-  document.getElementById("watchlist").innerHTML = m.watchlist.map(quoteRow).join("");
+  MARKETS_DATA = m;
   document.getElementById("indices").innerHTML = m.indices.map(quoteRow).join("");
-  document.getElementById("watchlist-label").textContent = m.listName ? `Watchlist · ${m.listName}` : "Watchlist";
+  const chosenList = renderWatchlist();   // renders the featured list + its picker
 
   document.getElementById("macro-strip").innerHTML = m.macro.map(x => `
     <div class="stat">
@@ -212,7 +254,8 @@ function render(data) {
   }).join("");
 
   // home dispatch summaries (derived)
-  const topGainer = [...m.watchlist].sort((a, b) => (b.chg || 0) - (a.chg || 0))[0];
+  const wlRows = (chosenList && chosenList.rows) || m.watchlist || [];
+  const topGainer = [...wlRows].sort((a, b) => (b.chg || 0) - (a.chg || 0))[0];
   const spx = m.indices.find(i => /S&P/i.test(i.t)) || m.indices[0];
   const tenY = m.indices.find(i => /10Y/i.test(i.t));
   document.getElementById("d-markets").textContent =
@@ -485,39 +528,49 @@ function renderPlayer(d) {
 /* ---------------------------------------------------------------------
    Boot: try live, fall back to sample
    --------------------------------------------------------------------- */
-async function boot() {
-  let data = SAMPLE, live = false;
+function buildData(j) {
+  const mk = j.markets || {};
+  return {
+    markets: {
+      listName: mk.listName || SAMPLE.markets.listName,
+      watchlist: mk.watchlist || SAMPLE.markets.watchlist,
+      lists: mk.lists || null,
+      indices: mk.indices || SAMPLE.markets.indices,
+      macro: mk.macro || SAMPLE.markets.macro,
+    },
+    sports: j.sports || SAMPLE.sports,
+    wine: ("wine" in j) ? j.wine : SAMPLE.wine,  // pass through null/[]: no curated stand-in
+    wineFetchedAt: j.wineFetchedAt || 0,
+    news: j.news || SAMPLE.news,
+  };
+}
+function applyDashboard(j) {
+  DASH_URL = j.dashboardUrl || "";
+  ECON_URL = j.econCalendarUrl || "";
+  render(buildData(j));
+  renderTopButtons();
+}
+async function reloadDashboard() {
   try {
     const res = await fetch(API_BASE + "/api/dashboard", { cache: "no-store" });
-    if (res.ok) {
-      const j = await res.json();
-      const mk = j.markets || {};
-      data = {
-        markets: {
-          listName: mk.listName || SAMPLE.markets.listName,
-          watchlist: mk.watchlist || SAMPLE.markets.watchlist,
-          indices: mk.indices || SAMPLE.markets.indices,
-          macro: mk.macro || SAMPLE.markets.macro,
-        },
-        sports: j.sports || SAMPLE.sports,
-        wine: ("wine" in j) ? j.wine : SAMPLE.wine,  // pass through null/[]: no curated stand-in
-        wineFetchedAt: j.wineFetchedAt || 0,
-        news: j.news || SAMPLE.news,
-      };
-      DASH_URL = j.dashboardUrl || "";
-      ECON_URL = j.econCalendarUrl || "";
-      live = !!(j.markets || j.sports || j.wine || j.news);
-    }
+    if (res.ok) applyDashboard(await res.json());
+  } catch (e) { /* keep the last good render */ }
+}
+async function boot() {
+  let j = null, live = false;
+  try {
+    const res = await fetch(API_BASE + "/api/dashboard", { cache: "no-store" });
+    if (res.ok) { j = await res.json(); live = !!(j.markets || j.sports || j.wine || j.news); }
   } catch (e) { /* backend not up — keep sample */ }
 
-  render(data);
-  renderTopButtons();
+  if (j) applyDashboard(j);
+  else { render(SAMPLE); renderTopButtons(); }
   document.getElementById("data-status").textContent = live
     ? "Live data connected."
     : "Showing sample data — start the backend to go live. See README.";
 
-  // Cold start: the live wine fetch warms in the background — poll it in.
-  if (data.wine == null) refreshWine();
+  applyRefresh((() => { try { return localStorage.getItem(REFRESH_KEY) || "off"; } catch (e) { return "off"; } })());
+  if (j && j.wine == null) refreshWine();  // cold start: warm the wine in
 }
 
 /* ---- clock + greeting ---- */
@@ -571,6 +624,8 @@ function applyTheme(t) {
   document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
   document.querySelectorAll("#theme-seg .seg-btn").forEach(b =>
     b.addEventListener("click", () => applyTheme(b.dataset.themeVal)));
+  document.querySelectorAll("#refresh-seg .seg-btn").forEach(b =>
+    b.addEventListener("click", () => applyRefresh(b.dataset.refreshVal)));
   // sync the toggle to whatever the no-flash head script already applied
   applyTheme(document.documentElement.classList.contains("theme-light") ? "light" : "dark");
 })();

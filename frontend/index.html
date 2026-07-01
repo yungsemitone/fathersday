@@ -316,6 +316,10 @@
   .seg-btn { flex: 1; appearance: none; background: none; border: 0; cursor: pointer; border-radius: 7px; padding: 8px 10px; font-family: "Libre Franklin", sans-serif; font-size: 13px; font-weight: 600; color: var(--ink-3); transition: background .15s ease, color .15s ease; }
   .seg-btn:hover { color: var(--ink-2); }
   .seg-btn[aria-selected="true"] { background: var(--claret); color: #fff; }
+  .opt-list { display: flex; flex-direction: column; gap: 5px; }
+  .opt-btn { appearance: none; text-align: left; background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 11px; cursor: pointer; font-family: "Libre Franklin", sans-serif; font-size: 13px; color: var(--ink-2); transition: color .15s ease, border-color .15s ease; }
+  .opt-btn:hover { color: var(--ink); }
+  .opt-btn[aria-selected="true"] { border-color: var(--claret); color: var(--ink); font-weight: 600; }
 </style>
 
 <div class="wrap">
@@ -341,6 +345,18 @@
           <button class="seg-btn" role="tab" data-theme-val="dark">Dark</button>
           <button class="seg-btn" role="tab" data-theme-val="light">Light</button>
         </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-label">Auto-refresh</div>
+        <div class="segmented" id="refresh-seg" role="tablist" aria-label="Auto-refresh">
+          <button class="seg-btn" role="tab" data-refresh-val="off">Off</button>
+          <button class="seg-btn" role="tab" data-refresh-val="normal">5 min</button>
+          <button class="seg-btn" role="tab" data-refresh-val="live">1 min</button>
+        </div>
+      </div>
+      <div class="settings-section" id="watchlist-setting" hidden>
+        <div class="settings-label">Featured watchlist</div>
+        <div class="opt-list" id="watchlist-opts"></div>
       </div>
     </div>
   </div>
@@ -448,4 +464,4 @@
   </div>
 </div>
 
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>

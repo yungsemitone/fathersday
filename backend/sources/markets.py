@@ -52,29 +52,32 @@ def _num(x):
         return None
 
 
-def _watchlist():
+def _watchlists():
+    """All of Dad's lists as [{name, rows}], plus the default list's name."""
     data = get_json(f"{STOCK_API_BASE}/api/watchlists")
     lists = (data or {}).get("lists") if isinstance(data, dict) else None
     if not lists:
         return None, None
 
-    chosen = None
-    if FEATURED_WATCHLIST:
-        chosen = next((l for l in lists if l.get("name") == FEATURED_WATCHLIST), None)
-    chosen = chosen or lists[0]
-
-    rows = []
-    for q in chosen.get("quotes", []):
-        px, chg = _num(q.get("price")), _num(q.get("change_pct"))
-        if px is None:
-            continue
-        rows.append({
-            "t": q.get("symbol", "?"),
-            "name": q.get("name", ""),
-            "px": px,
-            "chg": chg if chg is not None else 0.0,
-        })
-    return (rows or None), chosen.get("name")
+    out = []
+    for l in lists:
+        rows = []
+        for q in l.get("quotes", []):
+            px, chg = _num(q.get("price")), _num(q.get("change_pct"))
+            if px is None:
+                continue
+            rows.append({
+                "t": q.get("symbol", "?"),
+                "name": q.get("name", ""),
+                "px": px,
+                "chg": chg if chg is not None else 0.0,
+            })
+        if rows:
+            out.append({"name": l.get("name", ""), "rows": rows})
+    if not out:
+        return None, None
+    default = next((l["name"] for l in out if l["name"] == FEATURED_WATCHLIST), out[0]["name"])
+    return out, default
 
 
 def _tape():
@@ -132,19 +135,26 @@ def _macro():
 
 @cached(ttl_seconds=TTL_MARKETS)
 def fetch_markets():
-    watchlist, list_name = _watchlist()
+    lists, default_name = _watchlists()
     indices = _tape()
     macro = _macro()
 
     # If literally nothing came back, the Stock Scraper API is unreachable —
     # let the frontend show its sample. Otherwise return partial (None sections
     # are sample-filled client-side).
-    if watchlist is None and indices is None and macro is None:
+    if lists is None and indices is None and macro is None:
         return None
 
+    # The default list's rows also power the home dispatch + a simple fallback.
+    default_rows = None
+    if lists:
+        d = next((l for l in lists if l["name"] == default_name), lists[0])
+        default_rows = d["rows"]
+
     return {
-        "watchlist": watchlist,
+        "lists": lists,
+        "watchlist": default_rows,
+        "listName": default_name,
         "indices": indices,
         "macro": macro,
-        "listName": list_name,
     }
