@@ -25,7 +25,7 @@ from httpc import get_json
 # Yahoo symbol -> (display label, unit). Levels (yields, VIX) get no $; "%" for rates.
 TAPE = [
     ("^GSPC", "S&P 500", ""),
-    ("^IXIC", "Nasdaq", ""),
+    ("^NDX", "Nasdaq 100", ""),  # the Scraper tracks ^NDX (^IXIC isn't in its universe)
     ("^DJI", "Dow", ""),
     ("^RUT", "Russell 2000", ""),
     ("^VIX", "VIX", ""),
@@ -81,7 +81,9 @@ def _watchlists():
 
 
 def _tape():
-    data = get_json(f"{STOCK_API_BASE}/api/overview")
+    # default=1: always the Scraper's stock defaults, so Dad's tape stays put
+    # even when the Scraper dashboard's instruments are customized.
+    data = get_json(f"{STOCK_API_BASE}/api/overview?default=1")
     if not isinstance(data, dict):
         return None
     # Flatten every class into one symbol -> quote map.
