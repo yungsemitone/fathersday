@@ -18,8 +18,11 @@ gap with its built-in sample so the page always renders.
 from __future__ import annotations
 
 from cache import cached
-from config import FEATURED_WATCHLIST, STOCK_API_BASE, TTL_MARKETS
+from config import FEATURED_WATCHLIST, STOCK_API_BASE, STOCK_API_TOKEN, TTL_MARKETS
 from httpc import get_json
+
+# Auth for the Scraper API once it's password-protected (no-op until then).
+_AUTH = {"Authorization": f"Bearer {STOCK_API_TOKEN}"} if STOCK_API_TOKEN else None
 
 # --- The "tape": which broad instruments to show, and how to label them. ----
 # Yahoo symbol -> (display label, unit). Levels (yields, VIX) get no $; "%" for rates.
@@ -54,7 +57,7 @@ def _num(x):
 
 def _watchlists():
     """All of Dad's lists as [{name, rows}], plus the default list's name."""
-    data = get_json(f"{STOCK_API_BASE}/api/watchlists")
+    data = get_json(f"{STOCK_API_BASE}/api/watchlists", headers=_AUTH)
     lists = (data or {}).get("lists") if isinstance(data, dict) else None
     if not lists:
         return None, None
@@ -83,7 +86,7 @@ def _watchlists():
 def _tape():
     # default=1: always the Scraper's stock defaults, so Dad's tape stays put
     # even when the Scraper dashboard's instruments are customized.
-    data = get_json(f"{STOCK_API_BASE}/api/overview?default=1")
+    data = get_json(f"{STOCK_API_BASE}/api/overview?default=1", headers=_AUTH)
     if not isinstance(data, dict):
         return None
     # Flatten every class into one symbol -> quote map.
@@ -107,7 +110,7 @@ def _tape():
 
 
 def _macro():
-    data = get_json(f"{STOCK_API_BASE}/api/economy")
+    data = get_json(f"{STOCK_API_BASE}/api/economy", headers=_AUTH)
     inds = (data or {}).get("indicators") if isinstance(data, dict) else None
     if not inds:
         return None

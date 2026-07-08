@@ -26,9 +26,11 @@ _client = httpx.Client(
 )
 
 
-def get_json(url: str, params: dict | None = None) -> dict | list | None:
+def get_json(
+    url: str, params: dict | None = None, headers: dict | None = None
+) -> dict | list | None:
     try:
-        r = _client.get(url, params=params)
+        r = _client.get(url, params=params, headers=headers)
         r.raise_for_status()
         return r.json()
     except Exception as e:  # noqa: BLE001 - fail soft by design

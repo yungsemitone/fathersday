@@ -18,6 +18,10 @@ load_dotenv()
 # Local dev default; override with the deployed URL in production.
 STOCK_API_BASE = os.getenv("STOCK_API_BASE", "http://localhost:8000").rstrip("/")
 
+# The Scraper's family password (its DASHBOARD_PASSWORD). Sent as a bearer
+# token on every Scraper call once that API is locked; empty = no auth header.
+STOCK_API_TOKEN = os.getenv("STOCK_API_TOKEN", "")
+
 # Which of Dad's watchlists to feature on the Markets tab. Empty = first list.
 FEATURED_WATCHLIST = os.getenv("FEATURED_WATCHLIST", "")
 
