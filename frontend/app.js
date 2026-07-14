@@ -578,7 +578,7 @@ function refreshTime() {
   const now = new Date();
   const h = now.getHours();
   const greet = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
-  document.getElementById("greet").textContent = greet + ", Dad";
+  document.getElementById("greet").textContent = greet + ", Dad and Mom";
   const dateStr = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const timeStr = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   document.getElementById("asof").textContent = "as of " + timeStr;
